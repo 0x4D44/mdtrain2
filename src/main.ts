@@ -7,8 +7,10 @@ import {
   buildHudView,
   createInitialControls,
   createInitialSafety,
+  POWER_NOTCHES,
   reduceControls,
   resolveInputs,
+  resolvedBrakeDemand,
   tickSafety,
   type ControlIntent,
 } from "./sim/controls";
@@ -16,8 +18,10 @@ import { createInitialAws, tickAws } from "./sim/aws";
 import { createInitialState, step } from "./sim/simulation";
 import { EMU_GTO_4CAR, ADHESION } from "./sim/train";
 import { WESTFORD_EASTBANK } from "./sim/route";
-import { createScene } from "./render/scene";
+import { createScene, type RenderView } from "./render/scene";
 import { createHud } from "./ui/hud";
+import { createAudioEngine } from "./audio/engine";
+import { audioParams } from "./audio/params";
 
 const app = document.getElementById("app");
 if (!app) throw new Error("#app not found");
@@ -26,6 +30,7 @@ const route = WESTFORD_EASTBANK;
 const spec = EMU_GTO_4CAR;
 const scene = createScene(app, route);
 const hud = createHud(document.body);
+const audio = createAudioEngine();
 
 let state = createInitialState(0);
 let controls = createInitialControls();
@@ -42,6 +47,16 @@ window.addEventListener("keydown", (e) => {
 window.addEventListener("keyup", (e) => edges.delete(e.code));
 window.addEventListener("blur", () => edges.clear());
 window.addEventListener("resize", () => scene.resize());
+
+// Autoplay policy: the AudioContext may only resume after a user gesture. Start
+// it on the first keydown/pointerdown, then drop the listeners.
+function startAudioOnce(): void {
+  audio.start();
+  window.removeEventListener("keydown", startAudioOnce);
+  window.removeEventListener("pointerdown", startAudioOnce);
+}
+window.addEventListener("keydown", startAudioOnce);
+window.addEventListener("pointerdown", startAudioOnce);
 
 // Inline ~20-line decision-free keymap: edge set → ControlIntent (§2.3).
 function intentFromKeys(edgeSet: ReadonlySet<string>): ControlIntent {
@@ -76,8 +91,23 @@ function frame(now: number): void {
   const awsOut = tickAws(aws, state, route, intent, prevChainage, dir, dt); // post-step chainage
   aws = awsOut.next;
   safety = tickSafety(safety, intent, state, dt, { reasons: awsOut.reasons });
-  scene.render(state.chainage);
+
+  const view: RenderView = {
+    chainage: state.chainage,
+    speed: state.speed,
+    dt,
+    controls,
+    safety,
+    aws,
+    served: aws.served,
+  };
+  scene.render(view);
   hud.update(buildHudView(state, controls, safety, route, aws.served, awsOut.hud));
+
+  // Audio: whine under power, rolling with speed, hiss with the resolved brake
+  // demand (lever ∨ penalty full-service) — same authority the physics uses.
+  const brakeDemand = resolvedBrakeDemand(controls, safety);
+  audio.update(audioParams(state.speed, controls.powerNotch / POWER_NOTCHES, brakeDemand));
 
   edges.clear();
 }
