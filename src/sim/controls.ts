@@ -264,14 +264,11 @@ export function tickSafety(
     vigilanceTimer = DSD_PERIOD;
     dsdWarning = false;
   } else if (!stand) {
-    // 2. Countdown (motion-gated). At a stand the timer holds.
+    // 2. Countdown (motion-gated). At a stand (no ping) the timer and warning
+    //    simply hold — they keep the seeded values above, no branch needed.
     vigilanceTimer -= dt;
     dsdWarning = vigilanceTimer <= DSD_WARN_WINDOW;
     if (vigilanceTimer <= 0) reasons.add("DSD");
-  } else {
-    // At a stand with no ping: vigilance state holds (timer and warning
-    // unchanged) — the explicit hold, not an accidental fall-through.
-    dsdWarning = s.dsdWarning;
   }
 
   // 3. AWS/TPWS merge at the same point DSD adds its reason (Phase 1: none).

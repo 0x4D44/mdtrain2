@@ -20,7 +20,7 @@ import { tickAws } from "../src/sim/aws";
 import { EMU_GTO_4CAR, ADHESION } from "../src/sim/train";
 import type { Route } from "../src/sim/route";
 import { WESTFORD_EASTBANK } from "../src/sim/route";
-import { createInitialState, step, type SimInputs, type SimState } from "../src/sim/simulation";
+import { createInitialState, currentSpeedLimit, step, type SimInputs, type SimState } from "../src/sim/simulation";
 
 // ── Test fixtures & local helpers ────────────────────────────────────────────
 
@@ -495,7 +495,7 @@ describe("oracle O14: buildHudView projection", () => {
     const v = buildHudView(state, c, safety, WESTFORD_EASTBANK);
 
     expect(v.speedMph).toBeCloseTo(10 * MPS_TO_MPH, 9);
-    expect(v.limitMph).toBeCloseTo((50 * 0.44704) * MPS_TO_MPH, 9); // 50 mph limit at chainage 0
+    expect(v.limitMph).toBeCloseTo(currentSpeedLimit(WESTFORD_EASTBANK, state) * MPS_TO_MPH, 9); // pins the HUD's currentSpeedLimit path (P7)
     expect(v.chainage).toBe(0);
     expect(v.reverser).toBe("FWD");
     expect(v.powerNotch).toBe(2);

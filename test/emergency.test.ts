@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { type TrainSpec } from "../src/sim/physics";
 import { EMU_GTO_4CAR, ADHESION } from "../src/sim/train";
 import type { Route } from "../src/sim/route";
+import { WESTFORD_EASTBANK } from "../src/sim/route";
 import { step, type SimInputs, type SimState } from "../src/sim/simulation";
 
 const flatRoute: Route = {
@@ -115,5 +116,24 @@ describe("oracle O21: static-hold differential on a steep grade", () => {
     );
     expect(Math.abs(end.speed)).toBeLessThan(1e-3);
     expect(Math.abs(end.chainage - 1_000)).toBeLessThan(1e-3);
+  });
+
+  // Secondary sanity (HLD §4/O21): on the route's real steepest grade by
+  // magnitude (+1.2% Riverside climb, gravity ≈ 18.8 kN ≪ both hold forces)
+  // BOTH service and emergency hold — confirming the synthetic 0.12 grade is
+  // the discriminating fixture, not the route itself.
+  it("both service and emergency hold on the route's real 1.2% grade", () => {
+    const onGrade: SimState = { chainage: 1_200, speed: 0, brakeActual: 1, time: 0 };
+    for (const emergency of [false, true]) {
+      const end = drive(
+        onGrade,
+        { notch: 0, brake: 1, dir: 1, emergency, mu: ADHESION.wetNight },
+        10,
+        EMU_GTO_4CAR,
+        WESTFORD_EASTBANK,
+      );
+      expect(Math.abs(end.speed)).toBeLessThan(1e-3);
+      expect(Math.abs(end.chainage - 1_200)).toBeLessThan(1e-2);
+    }
   });
 });
