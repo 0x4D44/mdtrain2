@@ -289,9 +289,15 @@ describe("oracle O20: one-frame conflict resolution", () => {
     const out = reduceControls(controls({ brakeStep: 1 }), intent({ brakeUp: true, brakeDown: true }), stateAt(0), NO_PENALTY);
     expect(out.brakeStep).toBe(1);
   });
-  it("emergency overrides a brakeDown ⇒ EMERGENCY wins", () => {
+  it("emergency overrides a brakeDown ⇒ EMERGENCY wins, brakeDown suppressed", () => {
+    // brakeDown ALONE from STEP 1 would step down to RELEASE(0)…
+    const down = reduceControls(controls({ brakeStep: 1 }), intent({ brakeDown: true }), stateAt(20), NO_PENALTY);
+    expect(down.brakeStep).toBe(0);
+    // …but with emergency set, resolveEdges suppresses the brakeDown and the
+    // emergency wins outright — a result distinct from brakeDown alone.
     const out = reduceControls(controls({ brakeStep: 1 }), intent({ emergency: true, brakeDown: true }), stateAt(20), NO_PENALTY);
     expect(out.brakeStep).toBe(BRAKE_EMERGENCY);
+    expect(out.brakeStep).not.toBe(down.brakeStep);
   });
   it("multiple reverser edges are all ignored", () => {
     const c = controls({ reverser: "FWD", powerNotch: 0, lastDir: 1 });
@@ -376,8 +382,11 @@ describe("oracle O9: timeout → penalty → stop (moving, flatRoute)", () => {
     expect(sParked.penaltyReasons.size).toBe(0);
     expect(sParked.vigilanceTimer).toBe(DSD_PERIOD);
 
-    // Penalty forces brake=1, emergency=false, notch=0 ⇒ stops.
-    const inputs = resolveInputs(createInitialControls(), sMoving, MU);
+    // Penalty forces brake=1, emergency=false, notch=0 ⇒ stops. Build from a
+    // RELEASE lever (brakeStep 0) so the full demand can ONLY come from the
+    // penalty latch, not a coincidentally-full lever.
+    const releaseLever = controls({ brakeStep: 0 });
+    const inputs = resolveInputs(releaseLever, sMoving, MU);
     expect(inputs.brake).toBe(1);
     expect(inputs.emergency).toBe(false);
     expect(inputs.notch).toBe(0);
@@ -403,9 +412,20 @@ describe("oracle O11: ack while moving does NOT release", () => {
   });
 });
 
+describe("oracle O10b: at a stand WITHOUT ack does NOT release (ack-edge half)", () => {
+  it("ticking a latched penalty at a stand with no acknowledge keeps DSD", () => {
+    // Pins the acknowledge-EDGE half of the release predicate: standing still is
+    // necessary but NOT sufficient — release also requires the ack intent.
+    const held = tickFor(PENALTY, noIntent(), stateAt(0), 1, 1 / 60);
+    expect(held.penaltyReasons.has("DSD")).toBe(true);
+  });
+});
+
 describe("oracle O12: penalty brake is full SERVICE, not emergency (flatRoute)", () => {
   it("emergency false, brake 1; stops cleanly on the level", () => {
-    const inputs = resolveInputs(createInitialControls(), PENALTY, MU);
+    // RELEASE lever (brakeStep 0): the full demand must originate from the
+    // penalty latch alone, so dropping the penalty term would fail this oracle.
+    const inputs = resolveInputs(controls({ brakeStep: 0 }), PENALTY, MU);
     expect(inputs.emergency).toBe(false);
     expect(inputs.brake).toBe(1);
     const end = drive({ chainage: 0, speed: 20, brakeActual: 0, time: 0 }, inputs, 40);
@@ -432,7 +452,9 @@ describe("oracle O18: periodic pings while moving never penalise", () => {
 
 describe("oracle O23: penalty brake holds on a real falling grade", () => {
   it("full-service penalty holds at chainage 5200 on WESTFORD_EASTBANK (wet night)", () => {
-    const inputs = resolveInputs(createInitialControls(), PENALTY, ADHESION.wetNight);
+    // RELEASE lever (brakeStep 0): the holding demand comes from the penalty
+    // latch alone, not a coincidentally-full lever.
+    const inputs = resolveInputs(controls({ brakeStep: 0 }), PENALTY, ADHESION.wetNight);
     expect(inputs.emergency).toBe(false);
     expect(inputs.brake).toBe(1);
     expect(inputs.notch).toBe(0);

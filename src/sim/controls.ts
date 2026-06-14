@@ -98,6 +98,15 @@ function atStand(state: SimState): boolean {
   return Math.abs(state.speed) <= STAND_EPS;
 }
 
+/**
+ * Resolved brake demand: the larger of the driver's lever fraction and the
+ * penalty's full-service application. Shared by `resolveInputs` (the physics
+ * seam) and `buildHudView` (the display) so neither duplicates the rule.
+ */
+export function resolvedBrakeDemand(c: ControlState, s: SafetyState): number {
+  return Math.max(brakeFraction(c.brakeStep), penaltyActive(s) ? 1 : 0);
+}
+
 // ── Initial state ────────────────────────────────────────────────────────────
 
 export function createInitialControls(): ControlState {
@@ -213,9 +222,7 @@ export function resolveInputs(c: ControlState, s: SafetyState, mu: number): SimI
     brakeApplied(c.brakeStep) || c.reverser === "OFF" || c.dra || penaltyOn;
   const notch = powerInhibit ? 0 : notchFraction(c.powerNotch);
   const emergency = isEmergency(c.brakeStep); // ONLY the driver's EMERGENCY lever
-  const driverBrake = brakeFraction(c.brakeStep);
-  const penaltyBrake = penaltyOn ? 1 : 0; // penalty = FULL SERVICE demand
-  const brake = Math.max(driverBrake, penaltyBrake);
+  const brake = resolvedBrakeDemand(c, s); // max(lever, penalty full-service)
   return { notch, brake, dir, emergency, mu };
 }
 
@@ -250,24 +257,28 @@ export function tickSafety(
   let dsdWarning = s.dsdWarning;
   const reasons = new Set<PenaltyReason>(s.penaltyReasons);
 
-  const moving = Math.abs(state.speed) > STAND_EPS;
+  const stand = atStand(state);
 
   // 1. Vigilance reset on any control edge (acknowledge included).
   if (intent.vigilancePing) {
     vigilanceTimer = DSD_PERIOD;
     dsdWarning = false;
-  } else if (moving) {
+  } else if (!stand) {
     // 2. Countdown (motion-gated). At a stand the timer holds.
     vigilanceTimer -= dt;
     dsdWarning = vigilanceTimer <= DSD_WARN_WINDOW;
     if (vigilanceTimer <= 0) reasons.add("DSD");
+  } else {
+    // At a stand with no ping: vigilance state holds (timer and warning
+    // unchanged) — the explicit hold, not an accidental fall-through.
+    dsdWarning = s.dsdWarning;
   }
 
   // 3. AWS/TPWS merge at the same point DSD adds its reason (Phase 1: none).
   for (const r of aws.reasons) reasons.add(r);
 
   // 4. Latch release: ack edge AND at a stand clears clearable reasons.
-  if (intent.acknowledge && Math.abs(state.speed) <= STAND_EPS) {
+  if (intent.acknowledge && stand) {
     reasons.delete("DSD");
     // (Phase-2 persisting reasons would re-add themselves above; none here.)
   }
@@ -277,19 +288,13 @@ export function tickSafety(
 
 // ── HUD projection (pure) ────────────────────────────────────────────────────
 
+const BRAKE_RELEASE = 0; // index 0 = RELEASE (lever fully off)
+
 function brakeLabel(brakeStep: number): string {
-  switch (brakeStep) {
-    case 0:
-      return "RELEASE";
-    case 1:
-      return "STEP 1";
-    case 2:
-      return "STEP 2";
-    case BRAKE_FULL:
-      return "FULL SERVICE";
-    default:
-      return "EMERGENCY"; // BRAKE_EMERGENCY (and any overshoot)
-  }
+  if (brakeStep <= BRAKE_RELEASE) return "RELEASE";
+  if (brakeStep >= BRAKE_EMERGENCY) return "EMERGENCY"; // (and any overshoot)
+  if (brakeStep >= BRAKE_FULL) return "FULL SERVICE";
+  return `STEP ${brakeStep}`; // service steps between RELEASE and FULL
 }
 
 /**
@@ -304,7 +309,6 @@ export function buildHudView(
   route: Route,
 ): HudView {
   const penalty = penaltyActive(s);
-  const inputs = resolveInputs(c, s, 0); // mu irrelevant to the demand/emergency fields
 
   // Next station strictly ahead in lastDir; guard the lookup (noUncheckedIndexedAccess).
   let nextStop = "— (end of line)";
@@ -324,7 +328,7 @@ export function buildHudView(
     powerNotch: c.powerNotch,
     powerMax: POWER_NOTCHES,
     brakeLabel: brakeLabel(c.brakeStep),
-    brakeDemandPct: inputs.brake * 100,
+    brakeDemandPct: resolvedBrakeDemand(c, s) * 100,
     brakeActualPct: state.brakeActual * 100,
     dra: c.dra,
     dsdWarning: s.dsdWarning,

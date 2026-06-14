@@ -22,6 +22,14 @@ export function createHud(parent: HTMLElement): { update(v: HudView): void } {
     return v;
   }
 
+  function lamp(text: string): HTMLSpanElement {
+    const s = document.createElement("span");
+    s.textContent = text;
+    s.style.cssText =
+      "padding:2px 8px;border-radius:3px;border:1px solid #2a3650;color:#5a6a82";
+    return s;
+  }
+
   const speed = row("SPEED");
   const limit = row("LIMIT");
   const reverser = row("REVERSER");
@@ -41,14 +49,6 @@ export function createHud(parent: HTMLElement): { update(v: HudView): void } {
   root.append(lamps);
 
   parent.appendChild(root);
-
-  function lamp(text: string): HTMLSpanElement {
-    const s = document.createElement("span");
-    s.textContent = text;
-    s.style.cssText =
-      "padding:2px 8px;border-radius:3px;border:1px solid #2a3650;color:#5a6a82";
-    return s;
-  }
 
   function setLamp(el: HTMLSpanElement, on: boolean, color: string): void {
     if (on) {
