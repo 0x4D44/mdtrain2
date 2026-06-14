@@ -41,7 +41,7 @@ function frame(now: number): void {
   if (held.has("KeyA")) controls.brake = Math.max(0, controls.brake - rate);
   if (held.has("KeyD")) controls.brake = Math.min(1, controls.brake + rate);
 
-  const inputs: SimInputs = { notch: controls.notch, brake: controls.brake, dir, mu: ADHESION.wetNight };
+  const inputs: SimInputs = { notch: controls.notch, brake: controls.brake, dir, mu: ADHESION.wetNight, emergency: false };
   state = step(spec, route, state, inputs, dt);
   scene.render(state.chainage);
 

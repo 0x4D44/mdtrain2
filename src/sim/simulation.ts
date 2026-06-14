@@ -14,6 +14,8 @@ export interface SimInputs {
   dir: 1 | -1;
   /** Rail adhesion coefficient. */
   mu: number;
+  /** Emergency brake selected ⇒ use the emergency decel target. */
+  emergency: boolean;
 }
 
 /** Everything the world needs to render one frame. */
@@ -67,6 +69,7 @@ export function step(
       dir: inputs.dir,
       grade,
       mu: inputs.mu,
+      emergency: inputs.emergency,
     });
 
     const prevSpeed = speed;

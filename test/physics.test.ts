@@ -72,7 +72,7 @@ describe("davis resistance", () => {
 describe("property: a braked train at a standstill never creeps", () => {
   it("stays at chainage 0 with brake applied and no power (level track)", () => {
     const start = createInitialState(0); // brakeActual = 1
-    const end = drive(start, { notch: 0, brake: 1, dir: 1, mu: ADHESION.wetNight }, 30);
+    const end = drive(start, { notch: 0, brake: 1, dir: 1, mu: ADHESION.wetNight, emergency: false }, 30);
     expect(Math.abs(end.speed)).toBeLessThan(1e-6);
     expect(Math.abs(end.chainage)).toBeLessThan(1e-6);
   });
@@ -80,7 +80,7 @@ describe("property: a braked train at a standstill never creeps", () => {
   it("also holds on a falling gradient", () => {
     // Eastbank approach falls at 1%; full brake must still hold it.
     const start: SimState = { chainage: 5_200, speed: 0, brakeActual: 1, time: 0 };
-    const end = drive(start, { notch: 0, brake: 1, dir: 1, mu: ADHESION.wetNight }, 30, EMU_GTO_4CAR, WESTFORD_EASTBANK);
+    const end = drive(start, { notch: 0, brake: 1, dir: 1, mu: ADHESION.wetNight, emergency: false }, 30, EMU_GTO_4CAR, WESTFORD_EASTBANK);
     expect(Math.abs(end.speed)).toBeLessThan(0.05);
     expect(Math.abs(end.chainage - 5_200)).toBeLessThan(1);
   });
@@ -88,8 +88,8 @@ describe("property: a braked train at a standstill never creeps", () => {
 
 describe("property: the reverser drives the correct way", () => {
   it("forward power increases chainage, reverse decreases it", () => {
-    const fwd = drive({ chainage: 1_000, speed: 0, brakeActual: 0, time: 0 }, { notch: 1, brake: 0, dir: 1, mu: ADHESION.dry }, 10);
-    const rev = drive({ chainage: 1_000, speed: 0, brakeActual: 0, time: 0 }, { notch: 1, brake: 0, dir: -1, mu: ADHESION.dry }, 10);
+    const fwd = drive({ chainage: 1_000, speed: 0, brakeActual: 0, time: 0 }, { notch: 1, brake: 0, dir: 1, mu: ADHESION.dry, emergency: false }, 10);
+    const rev = drive({ chainage: 1_000, speed: 0, brakeActual: 0, time: 0 }, { notch: 1, brake: 0, dir: -1, mu: ADHESION.dry, emergency: false }, 10);
     expect(fwd.chainage).toBeGreaterThan(1_000);
     expect(fwd.speed).toBeGreaterThan(0);
     expect(rev.chainage).toBeLessThan(1_000);
@@ -100,7 +100,7 @@ describe("property: the reverser drives the correct way", () => {
 describe("property: with no brake or power, a downhill train runs away", () => {
   it("accelerates down a falling gradient", () => {
     const start: SimState = { chainage: 5_000, speed: 0, brakeActual: 0, time: 0 };
-    const end = drive(start, { notch: 0, brake: 0, dir: 1, mu: ADHESION.dry }, 15, EMU_GTO_4CAR, WESTFORD_EASTBANK);
+    const end = drive(start, { notch: 0, brake: 0, dir: 1, mu: ADHESION.dry, emergency: false }, 15, EMU_GTO_4CAR, WESTFORD_EASTBANK);
     expect(end.speed).toBeGreaterThan(0.5);
     expect(end.chainage).toBeGreaterThan(5_000);
   });
@@ -115,7 +115,7 @@ describe("oracle: braking distance matches the analytic value", () => {
     const decel = spec.brakeServiceDecel; // brake not adhesion-limited here
     const expected = (v0 * v0) / (2 * decel); // metres
     const start: SimState = { chainage: 0, speed: v0, brakeActual: 1, time: 0 };
-    const end = drive(start, { notch: 0, brake: 1, dir: 1, mu: ADHESION.dry }, 40, spec);
+    const end = drive(start, { notch: 0, brake: 1, dir: 1, mu: ADHESION.dry, emergency: false }, 40, spec);
     expect(end.speed).toBeLessThan(1e-3);
     expect(end.chainage).toBeGreaterThan(expected * 0.97);
     expect(end.chainage).toBeLessThan(expected * 1.03);
@@ -125,7 +125,7 @@ describe("oracle: braking distance matches the analytic value", () => {
 describe("oracle: production integrator agrees with an independent RK4", () => {
   it("coast-down distance and speed match within tolerance", () => {
     const spec = EMU_GTO_4CAR;
-    const inp: AccelInputs = { v: 0, notch: 0, brakeActual: 0, dir: 1, grade: 0, mu: ADHESION.dry };
+    const inp: AccelInputs = { v: 0, notch: 0, brakeActual: 0, dir: 1, grade: 0, mu: ADHESION.dry, emergency: false };
     const T = 20;
     const h = 1 / 240;
 
@@ -142,7 +142,7 @@ describe("oracle: production integrator agrees with an independent RK4", () => {
       s += (h / 6) * (k1s + 2 * k2s + 2 * k3s + k4s);
     }
 
-    const prod = drive({ chainage: 0, speed: 25, brakeActual: 0, time: 0 }, { notch: 0, brake: 0, dir: 1, mu: ADHESION.dry }, T, spec, flatRoute, h);
+    const prod = drive({ chainage: 0, speed: 25, brakeActual: 0, time: 0 }, { notch: 0, brake: 0, dir: 1, mu: ADHESION.dry, emergency: false }, T, spec, flatRoute, h);
     expect(prod.speed).toBeCloseTo(v, 1);
     expect(Math.abs(prod.chainage - s) / s).toBeLessThan(0.005);
   });

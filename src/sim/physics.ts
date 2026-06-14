@@ -55,9 +55,19 @@ export function davisResistance(spec: TrainSpec, speed: number): number {
   return Math.max(0, spec.davisA + spec.davisB * v + spec.davisC * v * v);
 }
 
-/** Brake force for a given actual brake fraction (N, ≥ 0), adhesion-limited. */
-export function brakeForce(spec: TrainSpec, brakeActual: number, mu: number): number {
-  const demanded = clamp01(brakeActual) * spec.brakeServiceDecel * effectiveMass(spec);
+/**
+ * Brake force for a given actual brake fraction (N, ≥ 0), adhesion-limited.
+ * `emergency` selects the (higher) emergency deceleration target instead of the
+ * service one — a genuinely distinct decel, not a re-scaled `brake=1`.
+ */
+export function brakeForce(
+  spec: TrainSpec,
+  brakeActual: number,
+  mu: number,
+  emergency = false,
+): number {
+  const decel = emergency ? spec.brakeEmergencyDecel : spec.brakeServiceDecel;
+  const demanded = clamp01(brakeActual) * decel * effectiveMass(spec);
   const adhesionLimit = mu * spec.mass * G; // braked on all axles
   return Math.max(0, Math.min(demanded, adhesionLimit));
 }
@@ -75,6 +85,8 @@ export interface AccelInputs {
   grade: number;
   /** Rail adhesion coefficient (dry ≈ 0.30, wet night ≈ 0.20). */
   mu: number;
+  /** Emergency brake selected ⇒ use the emergency decel target. */
+  emergency: boolean;
 }
 
 /**
@@ -86,7 +98,7 @@ export function acceleration(spec: TrainSpec, inp: AccelInputs): number {
   const meff = effectiveMass(spec);
   const fTraction = inp.notch * tractiveEffort(spec, inp.v, inp.mu) * inp.dir;
   const fGravity = -spec.mass * G * inp.grade; // along +chainage
-  const fBrake = brakeForce(spec, inp.brakeActual, inp.mu);
+  const fBrake = brakeForce(spec, inp.brakeActual, inp.mu, inp.emergency);
   const fResist = davisResistance(spec, inp.v);
 
   const vEps = 1e-3;
