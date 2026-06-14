@@ -12,7 +12,7 @@ import {
   tickSafety,
   type ControlIntent,
 } from "./sim/controls";
-import { tickAws } from "./sim/aws";
+import { createInitialAws, tickAws } from "./sim/aws";
 import { createInitialState, step } from "./sim/simulation";
 import { EMU_GTO_4CAR, ADHESION } from "./sim/train";
 import { WESTFORD_EASTBANK } from "./sim/route";
@@ -30,6 +30,7 @@ const hud = createHud(document.body);
 let state = createInitialState(0);
 let controls = createInitialControls();
 let safety = createInitialSafety();
+let aws = createInitialAws();
 
 // Per-frame edge set of just-pressed key codes (keydown ignores auto-repeat so a
 // hold never re-fires a detent; keyup/blur are housekeeping).
@@ -68,11 +69,15 @@ function frame(now: number): void {
 
   const intent = intentFromKeys(edges);
   controls = reduceControls(controls, intent, state, safety); // safety = prior frame's
-  safety = tickSafety(safety, intent, state, dt, tickAws(state, dt));
   const inputs = resolveInputs(controls, safety, ADHESION.wetNight);
-  state = step(spec, route, state, inputs, dt);
+  const prevChainage = state.chainage; // pre-step
+  state = step(spec, route, state, inputs, dt); // advance FIRST (crossing detection needs prev→now)
+  const dir = controls.lastDir; // same authority resolveInputs uses
+  const awsOut = tickAws(aws, state, route, intent, prevChainage, dir, dt); // post-step chainage
+  aws = awsOut.next;
+  safety = tickSafety(safety, intent, state, dt, { reasons: awsOut.reasons });
   scene.render(state.chainage);
-  hud.update(buildHudView(state, controls, safety, route));
+  hud.update(buildHudView(state, controls, safety, route, aws.served, awsOut.hud));
 
   edges.clear();
 }

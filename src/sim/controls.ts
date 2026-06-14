@@ -4,9 +4,10 @@
 // `SafetyState` stepped alongside `step()`, and turns driver intent + timed
 // safety into the existing `SimInputs`.
 
-import type { AwsOutput } from "./aws";
+import type { AwsHud, AwsOutput, Sunflower } from "./aws";
 import { clamp, clamp01 } from "./physics";
-import type { Route } from "./route";
+import type { Aspect, Route } from "./route";
+import { aspectAt, nextSignalAhead } from "./route";
 import { currentSpeedLimit, type SimInputs, type SimState } from "./simulation";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -57,6 +58,8 @@ export interface HudView {
   penalty: boolean;
   nextStop: string;
   chainage: number;
+  aspect: Aspect; // next-signal-ahead aspect, derived (GREEN when none ahead / reverse)
+  sunflower: Sunflower; // AWS caution reminder lamp
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -255,7 +258,11 @@ export function tickSafety(
 ): SafetyState {
   let vigilanceTimer = s.vigilanceTimer;
   let dsdWarning = s.dsdWarning;
-  const reasons = new Set<PenaltyReason>(s.penaltyReasons);
+  // P2-RA: carry-forward seed scoped to DSD-only. AWS/TPWS reasons are re-derived
+  // fresh from the fold (:275) every tick (present iff `tickAws` returns them),
+  // so they become releasable the same tick the source stops demanding them.
+  const reasons = new Set<PenaltyReason>();
+  if (s.penaltyReasons.has("DSD")) reasons.add("DSD");
 
   const stand = atStand(state);
 
@@ -304,6 +311,8 @@ export function buildHudView(
   c: ControlState,
   s: SafetyState,
   route: Route,
+  served: ReadonlySet<string>,
+  aws: AwsHud,
 ): HudView {
   const penalty = penaltyActive(s);
 
@@ -317,6 +326,11 @@ export function buildHudView(
       nextStop = station.name;
     }
   }
+
+  // HUD aspect: the next signal ahead in lastDir over `served`; GREEN when none
+  // ahead (which includes reverse running, where nextSignalAhead returns null).
+  const ahead = nextSignalAhead(route, state.chainage, c.lastDir);
+  const aspect: Aspect = ahead ? aspectAt(route, ahead.i, served) : "GREEN";
 
   return {
     speedMph: Math.abs(state.speed) * MPS_TO_MPH,
@@ -332,5 +346,7 @@ export function buildHudView(
     penalty,
     nextStop,
     chainage: state.chainage,
+    aspect,
+    sunflower: aws.sunflower,
   };
 }

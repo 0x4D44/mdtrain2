@@ -38,6 +38,7 @@ export function createHud(parent: HTMLElement): { update(v: HudView): void } {
   const brakePct = row("BRK D/A");
   const nextStop = row("NEXT");
   const chainage = row("CHAINAGE");
+  const aspect = row("ASPECT");
 
   // Lamps row spans both columns.
   const lamps = document.createElement("div");
@@ -45,8 +46,17 @@ export function createHud(parent: HTMLElement): { update(v: HudView): void } {
   const dra = lamp("DRA");
   const dsd = lamp("DSD");
   const penalty = lamp("PENALTY");
-  lamps.append(dra, dsd, penalty);
+  const sunflower = lamp("AWS");
+  lamps.append(dra, dsd, penalty, sunflower);
   root.append(lamps);
+
+  // Four-colour aspect lamp colours.
+  const ASPECT_COLOUR: Record<HudView["aspect"], string> = {
+    RED: "#e04030",
+    YELLOW: "#e0b020",
+    DOUBLE_YELLOW: "#e0b020",
+    GREEN: "#30c050",
+  };
 
   parent.appendChild(root);
 
@@ -71,10 +81,13 @@ export function createHud(parent: HTMLElement): { update(v: HudView): void } {
     brakePct.textContent = `${v.brakeDemandPct.toFixed(0)}% / ${v.brakeActualPct.toFixed(0)}%`;
     nextStop.textContent = v.nextStop;
     chainage.textContent = `${v.chainage.toFixed(0)} m`;
+    aspect.textContent = v.aspect;
+    aspect.style.color = ASPECT_COLOUR[v.aspect];
 
     setLamp(dra, v.dra, "#e0b020"); // amber — DRA set
     setLamp(dsd, v.dsdWarning, "#e0b020"); // amber — DSD warning
     setLamp(penalty, v.penalty, "#e04030"); // red — penalty
+    setLamp(sunflower, v.sunflower === "CAUTION", "#e0b020"); // amber — AWS caution latched
   }
 
   return { update };

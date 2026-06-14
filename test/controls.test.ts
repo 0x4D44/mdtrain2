@@ -16,7 +16,8 @@ import {
   type ControlState,
   type SafetyState,
 } from "../src/sim/controls";
-import { tickAws } from "../src/sim/aws";
+import { createInitialAws, tickAws } from "../src/sim/aws";
+import type { AwsHud } from "../src/sim/aws";
 import { EMU_GTO_4CAR, ADHESION } from "../src/sim/train";
 import type { Route } from "../src/sim/route";
 import { WESTFORD_EASTBANK } from "../src/sim/route";
@@ -74,17 +75,30 @@ const PENALTY: SafetyState = {
   penaltyReasons: new Set(["DSD"]),
 };
 
-/** Advance tickSafety over `seconds` in fine `dt` slices with fixed inputs. */
+// The neutral AwsHud the O14 fixtures assert against (no signals ⇒ BLACK/clear).
+const BLACK_HUD: AwsHud = { sunflower: "BLACK", spad: false };
+
+/**
+ * Advance tickSafety over `seconds` in fine `dt` slices with fixed inputs,
+ * threading an `AwsState` alongside. These DSD fixtures use signal-free routes
+ * and pass `state.chainage` as both prev and now, so `tickAws` crosses nothing
+ * and returns `reasons: []` every tick (DSD behaviour unchanged).
+ */
 function tickFor(
   s: SafetyState,
   it_: ControlIntent,
   state: SimState,
   seconds: number,
   dt = 1 / 60,
+  route: Route = flatRoute,
+  dir: 1 | -1 = 1,
 ): SafetyState {
   let cur = s;
+  let a = createInitialAws();
   for (let t = 0; t < seconds - 1e-9; t += dt) {
-    cur = tickSafety(cur, it_, state, dt, tickAws(state, dt));
+    const o = tickAws(a, state, route, it_, state.chainage, dir, dt);
+    a = o.next;
+    cur = tickSafety(cur, it_, state, dt, { reasons: o.reasons });
   }
   return cur;
 }
@@ -398,7 +412,7 @@ describe("oracle O9: timeout → penalty → stop (moving, flatRoute)", () => {
 
 describe("oracle O10: ack at a stand releases the latch", () => {
   it("acknowledge while stopped empties penaltyReasons; power available again", () => {
-    const released = tickSafety(PENALTY, intent({ acknowledge: true, vigilancePing: true }), stateAt(0), 1 / 60, tickAws(stateAt(0), 1 / 60));
+    const released = tickSafety(PENALTY, intent({ acknowledge: true, vigilancePing: true }), stateAt(0), 1 / 60, tickAws(createInitialAws(), stateAt(0), flatRoute, intent({ acknowledge: true, vigilancePing: true }), 0, 1, 1 / 60));
     expect(released.penaltyReasons.size).toBe(0);
 
     const c = controls({ reverser: "FWD", powerNotch: 4, brakeStep: 0 });
@@ -408,7 +422,7 @@ describe("oracle O10: ack at a stand releases the latch", () => {
 
 describe("oracle O11: ack while moving does NOT release", () => {
   it("acknowledge at speed 5 keeps DSD latched", () => {
-    const out = tickSafety(PENALTY, intent({ acknowledge: true, vigilancePing: true }), stateAt(5), 1 / 60, tickAws(stateAt(5), 1 / 60));
+    const out = tickSafety(PENALTY, intent({ acknowledge: true, vigilancePing: true }), stateAt(5), 1 / 60, tickAws(createInitialAws(), stateAt(5), flatRoute, intent({ acknowledge: true, vigilancePing: true }), 0, 1, 1 / 60));
     expect(out.penaltyReasons.has("DSD")).toBe(true);
   });
 });
@@ -443,7 +457,8 @@ describe("oracle O18: periodic pings while moving never penalise", () => {
     let sinceLastPing = 0;
     for (let t = 0; t < 2 * DSD_PERIOD; t += dt) {
       const ping = sinceLastPing >= pingInterval;
-      s = tickSafety(s, ping ? intent({ vigilancePing: true }) : noIntent(), moving, dt, tickAws(moving, dt));
+      const pingIntent = ping ? intent({ vigilancePing: true }) : noIntent();
+      s = tickSafety(s, pingIntent, moving, dt, tickAws(createInitialAws(), moving, flatRoute, pingIntent, moving.chainage, 1, dt));
       sinceLastPing = ping ? 0 : sinceLastPing + dt;
       expect(s.dsdWarning).toBe(false);
       expect(s.penaltyReasons.size).toBe(0);
@@ -466,14 +481,12 @@ describe("oracle O23: penalty brake holds on a real falling grade", () => {
   });
 });
 
-// ── O13 — AWS/TPWS stub pass-through ─────────────────────────────────────────
+// ── H2 — O13 migration: signal-free DSD invariant preserved ──────────────────
 
-describe("oracle O13: AWS stub pass-through", () => {
-  it("tickAws returns no reasons; tickSafety adds nothing beyond DSD; pings stay clear", () => {
-    expect(tickAws(stateAt(0), 1 / 60).reasons).toEqual([]);
-    expect(tickAws(stateAt(20), 0.5).reasons).toEqual([]);
-
-    // A full tickSafety with the stub adds no reason beyond DSD.
+describe("oracle H2: signal-free route ⇒ DSD unchanged; DSD-scoped seed releases", () => {
+  it("DSD latches alone, pings stay clear, and ack-at-stand still releases DSD", () => {
+    // A full tickFor over DSD_PERIOD on the signal-free route adds DSD only —
+    // tickAws crosses nothing (no signals) and returns []. (Original O13 body.)
     const moving = stateAt(20);
     const s = tickFor(createInitialSafety(), noIntent(), moving, DSD_PERIOD + 1);
     expect([...s.penaltyReasons]).toEqual(["DSD"]);
@@ -481,6 +494,17 @@ describe("oracle O13: AWS stub pass-through", () => {
     // Vigilance pings keep it penalty-free.
     const pinged = tickFor(createInitialSafety(), intent({ vigilancePing: true }), moving, DSD_PERIOD + 1);
     expect(pinged.penaltyReasons.size).toBe(0);
+
+    // The DSD-scoped seed does not regress DSD release: ack-at-stand clears it.
+    const ack = intent({ acknowledge: true, vigilancePing: true });
+    const released = tickSafety(
+      s,
+      ack,
+      stateAt(0),
+      1 / 60,
+      tickAws(createInitialAws(), stateAt(0), flatRoute, ack, 0, 1, 1 / 60),
+    );
+    expect(released.penaltyReasons.size).toBe(0);
   });
 });
 
@@ -493,7 +517,7 @@ describe("oracle O14: buildHudView projection", () => {
     const c = controls({ reverser: "FWD", powerNotch: 2, brakeStep: 2, dra: true });
     const state: SimState = { chainage: 0, speed: 10, brakeActual: 0.4, time: 0 };
     const safety: SafetyState = { vigilanceTimer: 5, dsdWarning: true, penaltyReasons: new Set() };
-    const v = buildHudView(state, c, safety, WESTFORD_EASTBANK);
+    const v = buildHudView(state, c, safety, WESTFORD_EASTBANK, new Set(), BLACK_HUD);
 
     expect(v.speedMph).toBeCloseTo(10 * MPS_TO_MPH, 9);
     expect(v.limitMph).toBeCloseTo(currentSpeedLimit(WESTFORD_EASTBANK, state) * MPS_TO_MPH, 9); // pins the HUD's currentSpeedLimit path (P7)
@@ -509,10 +533,38 @@ describe("oracle O14: buildHudView projection", () => {
     expect(v.dra).toBe(true);
     expect(v.dsdWarning).toBe(true);
     expect(v.penalty).toBe(false);
+    // Aspect/sunflower additions (D11): chainage 0 FWD, served empty ⇒ the next
+    // signal ahead is S1 (Riverside RED); the BLACK_HUD ⇒ sunflower BLACK.
+    expect(v.aspect).toBe("RED");
+    expect(v.sunflower).toBe("BLACK");
+  });
+
+  it("aspect tracks served and sunflower copies the AwsHud", () => {
+    const c = controls({ reverser: "FWD", lastDir: 1 });
+    const state: SimState = { chainage: 0, speed: 0, brakeActual: 1, time: 0 };
+    const allServed = new Set(["Riverside", "City Centre", "Victoria Street"]);
+    // Whole line served ⇒ S1 GREEN; CAUTION sunflower flows through from the HUD.
+    const v = buildHudView(state, c, createInitialSafety(), WESTFORD_EASTBANK, allServed, {
+      sunflower: "CAUTION",
+      spad: true,
+    });
+    expect(v.aspect).toBe("GREEN");
+    expect(v.sunflower).toBe("CAUTION");
+    // Reverse running shows decorative GREEN regardless of served.
+    const rev = controls({ reverser: "REV", lastDir: -1 });
+    const vRev = buildHudView(
+      { chainage: 1_600, speed: 0, brakeActual: 1, time: 0 },
+      rev,
+      createInitialSafety(),
+      WESTFORD_EASTBANK,
+      new Set(),
+      BLACK_HUD,
+    );
+    expect(vRev.aspect).toBe("GREEN");
   });
 
   it("at spawn both demand and actual read FULL SERVICE", () => {
-    const v = buildHudView(createInitialState(0), createInitialControls(), createInitialSafety(), WESTFORD_EASTBANK);
+    const v = buildHudView(createInitialState(0), createInitialControls(), createInitialSafety(), WESTFORD_EASTBANK, new Set(), BLACK_HUD);
     expect(v.brakeLabel).toBe("FULL SERVICE");
     expect(v.brakeDemandPct).toBeCloseTo(100, 9);
     expect(v.brakeActualPct).toBeCloseTo(100, 9);
@@ -520,7 +572,7 @@ describe("oracle O14: buildHudView projection", () => {
 
   it("under penalty the displayed demand is forced full even with a lower lever", () => {
     const c = controls({ brakeStep: 1 }); // STEP 1 lever
-    const v = buildHudView(createInitialState(0), c, PENALTY, WESTFORD_EASTBANK);
+    const v = buildHudView(createInitialState(0), c, PENALTY, WESTFORD_EASTBANK, new Set(), BLACK_HUD);
     expect(v.brakeLabel).toBe("STEP 1"); // lever label is the physical lever
     expect(v.brakeDemandPct).toBeCloseTo(100, 9); // resolved demand is forced full
     expect(v.penalty).toBe(true);
@@ -528,31 +580,31 @@ describe("oracle O14: buildHudView projection", () => {
 
   it("EMERGENCY label", () => {
     const c = controls({ brakeStep: BRAKE_EMERGENCY });
-    const v = buildHudView(createInitialState(0), c, createInitialSafety(), WESTFORD_EASTBANK);
+    const v = buildHudView(createInitialState(0), c, createInitialSafety(), WESTFORD_EASTBANK, new Set(), BLACK_HUD);
     expect(v.brakeLabel).toBe("EMERGENCY");
   });
 
   it("nextStop SPAWN: chainage 0, +1 ⇒ Riverside (Westford already reached)", () => {
     const c = controls({ lastDir: 1 });
-    const v = buildHudView(createInitialState(0), c, createInitialSafety(), WESTFORD_EASTBANK);
+    const v = buildHudView(createInitialState(0), c, createInitialSafety(), WESTFORD_EASTBANK, new Set(), BLACK_HUD);
     expect(v.nextStop).toBe("Riverside");
   });
 
   it("nextStop forward picks the next increasing-chainage station", () => {
     const c = controls({ lastDir: 1 });
-    const v = buildHudView({ chainage: 1_600, speed: 0, brakeActual: 1, time: 0 }, c, createInitialSafety(), WESTFORD_EASTBANK);
+    const v = buildHudView({ chainage: 1_600, speed: 0, brakeActual: 1, time: 0 }, c, createInitialSafety(), WESTFORD_EASTBANK, new Set(), BLACK_HUD);
     expect(v.nextStop).toBe("City Centre"); // 3100 ahead of 1600
   });
 
   it("nextStop reverse: chainage 3200, -1 ⇒ City Centre (not Victoria Street)", () => {
     const c = controls({ lastDir: -1 });
-    const v = buildHudView({ chainage: 3_200, speed: 0, brakeActual: 1, time: 0 }, c, createInitialSafety(), WESTFORD_EASTBANK);
+    const v = buildHudView({ chainage: 3_200, speed: 0, brakeActual: 1, time: 0 }, c, createInitialSafety(), WESTFORD_EASTBANK, new Set(), BLACK_HUD);
     expect(v.nextStop).toBe("City Centre");
   });
 
   it("nextStop end-of-line: chainage 0, -1 ⇒ end of line", () => {
     const c = controls({ lastDir: -1 });
-    const v = buildHudView(createInitialState(0), c, createInitialSafety(), WESTFORD_EASTBANK);
+    const v = buildHudView(createInitialState(0), c, createInitialSafety(), WESTFORD_EASTBANK, new Set(), BLACK_HUD);
     expect(v.nextStop).toBe("— (end of line)");
   });
 });
