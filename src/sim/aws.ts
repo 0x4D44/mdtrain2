@@ -100,6 +100,13 @@ export function tickAws(
         next.add(station.name);
         served = next;
         sunflower = "BLACK"; // clear bell on serving a station (R3-1)
+        // F2: serving turns the protected starter GREEN, so any outstanding AWS
+        // WARNING for it should cancel (coherent real-AWS clear); don't touch a
+        // latched brakeReason.
+        if (phase === "WARNING") {
+          phase = "CLEAR";
+          warnTimer = 0;
+        }
       }
     }
   }
@@ -126,8 +133,9 @@ export function tickAws(
     }
   }
 
-  // 3. WARNING countdown.
-  if (phase === "WARNING") {
+  // 3. WARNING countdown — only while NOT already braked (F1: a latched brake
+  //    outranks a pending warning, so it never relabels brakeReason to "AWS").
+  if (phase === "WARNING" && brakeReason === null) {
     if (intent.acknowledge) {
       phase = "CLEAR"; // in-window ack (allowed while moving); sunflower stays CAUTION
     } else {

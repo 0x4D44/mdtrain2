@@ -253,6 +253,19 @@ describe("oracle A-SPAWN: starter-less origin ⇒ no aspect effect, HUD GREEN", 
     expect(aspectAt(route, 1, served)).toBe(aspectAt(route, 1, new Set()));
     expect(aspectAt(route, 2, served)).toBe(aspectAt(route, 2, new Set()));
   });
+
+  it("(machine) serving starter-less Westford yields no reason — a standing spawn tick", () => {
+    const route = aspectRoute();
+    // At spawn the train stands at the starter-less origin. tickAws serves
+    // Westford (no signal protects it) and produces no penalty reason.
+    const out = awsFor(route, [stand(0)], {
+      dt: 1 / 60,
+      seed: { ...createInitialAws(), served: new Set(["Westford"]) },
+    });
+    expect(out.aws.served.has("Westford")).toBe(true);
+    expect(out.reasons).toEqual([]); // serving a starter-less station ⇒ no reason
+    expect(out.aws.brakeReason).toBeNull();
+  });
 });
 
 describe("oracle A-REVERSE: reverse running shows decorative GREEN", () => {
@@ -444,6 +457,35 @@ describe("oracle B3: serving a station rings the clear bell ⇒ sunflower BLACK"
     expect(out.aws.sunflower).toBe("BLACK");
     expect(out.aws.served.has("Riverside")).toBe(true);
     expect(out.aws.phase).toBe("CLEAR");
+  });
+});
+
+describe("oracle B3-serve-cancels: serving cancels an outstanding AWS WARNING (F2)", () => {
+  it("cross magnet ⇒ WARNING; stop within the platform to serve ⇒ phase CLEAR, no AWS penalty", () => {
+    const route = aspectRoute();
+    // Cross the S1 magnet (arms WARNING, warnTimer = AWS_WARN_WINDOW = 3), then
+    // come to a stand within Riverside's platform (board 1500 ± 90) to serve it
+    // — WITHOUT acking. Serving turns S1 GREEN, so the AWS warning must cancel.
+    const segs: Seg[] = [
+      crossS1Magnet(8), // WARNING + CAUTION, warnTimer = 3
+      stand(1_498), // front 1500 == board ⇒ serves Riverside
+    ];
+    const out = awsFor(route, segs, { dt: 0.2 });
+    expect(out.aws.served.has("Riverside")).toBe(true);
+    expect(out.aws.phase).toBe("CLEAR"); // warning cancelled by the serve
+    expect(out.aws.warnTimer).toBe(0);
+    expect(out.aws.brakeReason).toBeNull();
+    expect(out.reasons).toEqual([]); // no AWS penalty raised ~3 s later
+
+    // Belt: keep ticking at the stand past where warnTimer would have hit 0 — no
+    // penalty ever materialises (the warning is gone, not merely paused).
+    let aws = out.aws;
+    for (let k = 0; k < 6; k++) {
+      const o = tickAws(aws, { chainage: 1_498, speed: 0, brakeActual: 1, time: 0 }, route, noIntent(), 1_498, 1, 1.0);
+      aws = o.next;
+      expect(o.reasons).toEqual([]);
+      expect(aws.brakeReason).toBeNull();
+    }
   });
 });
 
@@ -646,9 +688,13 @@ describe("oracle E2: a PSR-compliant approach never trips OSS", () => {
   });
 });
 
-describe("oracle E3: OSS arms only behind a RED starter", () => {
-  it("served starter (GREEN) ⇒ no OSS trip even at high speed (all three)", () => {
+describe("oracle E3: OSS arms only behind a RED starter (non-RED ⇒ no trip)", () => {
+  it("served starter (non-RED) ⇒ no OSS trip even at high speed (all three)", () => {
     const route = aspectRoute();
+    // Serving only the protected station clears its own held-RED. For S1/S2 a
+    // later stop ahead is still unserved (aspect YELLOW); for S3 nothing is ahead
+    // (GREEN). Either way the crossing is NON-RED, so OSS stays disarmed — the
+    // predicate keys off RED, not specifically GREEN.
     const cases = [
       { station: "Riverside", post: 1_620 },
       { station: "City Centre", post: 3_220 },
@@ -658,8 +704,18 @@ describe("oracle E3: OSS arms only behind a RED starter", () => {
       const loop = c.post - OSS_LOOP_OFFSET;
       const seg: Seg = { prev: loop - FRONT - 1, now: loop - FRONT + 1, speed: 20 };
       const out = awsFor(route, [seg], { dt: 0.05, seed: { ...createInitialAws(), served: new Set([c.station]) } });
-      expect(out.aws.brakeReason).toBeNull(); // GREEN starter ⇒ OSS disarmed
+      expect(out.aws.brakeReason).toBeNull(); // non-RED starter ⇒ OSS disarmed
     }
+  });
+
+  it("a genuinely GREEN starter (whole line served) ⇒ no OSS trip", () => {
+    const route = aspectRoute();
+    // S1 is GREEN only when its station AND everything ahead are served.
+    const loop = S1_POST - OSS_LOOP_OFFSET;
+    const seg: Seg = { prev: loop - FRONT - 1, now: loop - FRONT + 1, speed: 20 };
+    const out = awsFor(route, [seg], { dt: 0.05, seed: { ...createInitialAws(), served: ALL_SERVED } });
+    expect(aspectAt(route, 0, ALL_SERVED)).toBe("GREEN"); // genuinely GREEN
+    expect(out.aws.brakeReason).toBeNull();
   });
 });
 
@@ -680,6 +736,38 @@ describe("oracle F1-O: forward crossing a RED starter sets spad; GREEN does not"
     });
     expect(green.hud.spad).toBe(false);
     expect(green.aws.brakeReason).toBeNull();
+  });
+});
+
+describe("oracle F-keystone (machine): a served stop then depart is SPAD-free end-to-end", () => {
+  it("stand to serve S1 ⇒ GREEN; depart sweeping the now-GREEN post ⇒ brakeReason null, hud.spad false", () => {
+    const route = aspectRoute();
+    // The machine-level keystone: a stand within Riverside's platform serves the
+    // station (S1 GREEN over the served-set's whole forward cascade needs the line
+    // ahead too, but the POST predicate keys off RED only). Serving clears S1's
+    // held-RED, so the forward leg that sweeps the post crosses a NON-RED signal.
+    const segs: Seg[] = [
+      stand(1_498), // front 1500 == board ⇒ serves Riverside, S1 no longer RED
+      { prev: S1_POST - FRONT - 5, now: S1_POST + FRONT + 5, speed: 8 }, // sweep the post
+    ];
+    const out = awsFor(route, segs, { dt: 0.05 });
+    expect(out.aws.served.has("Riverside")).toBe(true);
+    expect(out.aws.brakeReason).toBeNull(); // no SPAD/TPWS latch
+    expect(out.hud.spad).toBe(false); // the SPAD-free keystone, end-to-end
+    expect(out.reasons).toEqual([]);
+  });
+
+  it("whole-line-served drive ⇒ GREEN post, no brake, no spad", () => {
+    const route = aspectRoute();
+    // With ALL_SERVED the post is genuinely GREEN; sweep it ⇒ still SPAD-free.
+    const out = awsFor(route, [{ prev: S1_POST - FRONT - 5, now: S1_POST + FRONT + 5, speed: 8 }], {
+      dt: 0.05,
+      seed: { ...createInitialAws(), served: ALL_SERVED },
+    });
+    expect(aspectAt(route, 0, ALL_SERVED)).toBe("GREEN");
+    expect(out.aws.brakeReason).toBeNull();
+    expect(out.hud.spad).toBe(false);
+    expect(out.reasons).toEqual([]);
   });
 });
 
@@ -794,6 +882,45 @@ describe("oracle G2: within-tick AWS-vs-TPWS precedence (coarse AND fine arms)",
     expect(out.aws.brakeReason).toBe("TPWS");
     expect(out.hud.spad).toBe(true);
     expect([...out.reasons].sort()).toEqual(["TPWS"]);
+  });
+});
+
+describe("oracle G2-clobber: a latched TPWS is never relabelled AWS by a stale WARNING", () => {
+  it("braked (TPWS, spad) with a WARNING still in flight ⇒ brakeReason STAYS TPWS past warnTimer→0", () => {
+    const route = aspectRoute(); // S1 RED (never served)
+    // Reach a state with BOTH: brakeReason="TPWS"/spad (front swept the RED post)
+    // AND an outstanding WARNING (warnTimer>0). The single coarse leg sweeps from
+    // before the magnet (1440) past the post (1620): the magnet arms the WARNING
+    // (warnTimer = AWS_WARN_WINDOW = 3) and the post then latches TPWS. With the
+    // F1 guard, the WARNING countdown is frozen while braked, so warnTimer stays
+    // at 3 and never drives brakeReason to "AWS".
+    const seed = awsFor(route, [{ prev: 1_428, now: 1_628, speed: 8 }], { dt: 0.5 }).aws;
+    expect(seed.brakeReason).toBe("TPWS");
+    expect(seed.spad).toBe(true);
+    expect(seed.phase).toBe("WARNING"); // warning still in flight
+    expect(seed.warnTimer).toBeGreaterThan(0);
+
+    // Tick forward several times with NO ack, well past where warnTimer would hit
+    // 0 (a frozen 3 s window over 6 × 1 s steps), keeping the front past the post
+    // so nothing new fires. brakeReason must stay "TPWS" (never flip to "AWS").
+    let aws = seed;
+    let lastReasons: PenaltyReason[] = [];
+    for (let k = 0; k < 6; k++) {
+      const o = tickAws(
+        aws,
+        { chainage: 1_630 + k, speed: 8, brakeActual: 1, time: 0 },
+        route,
+        noIntent(),
+        1_629 + k,
+        1,
+        1.0,
+      );
+      aws = o.next;
+      lastReasons = o.reasons;
+      expect(aws.brakeReason).toBe("TPWS"); // NEVER relabelled "AWS"
+      expect(aws.spad).toBe(true); // SPAD stays
+    }
+    expect(lastReasons).toEqual(["TPWS"]);
   });
 });
 
