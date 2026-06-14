@@ -33,6 +33,7 @@ const flatRoute: Route = {
   grades: [{ from: 0, to: 100_000, value: 0 }],
   speedLimits: [{ from: 0, to: 100_000, value: 40 }],
   curvatures: [{ from: 0, to: 100_000, value: 0 }],
+  signals: [],
 };
 
 const MU = ADHESION.wetNight;

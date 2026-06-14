@@ -11,6 +11,7 @@ const flatRoute: Route = {
   grades: [{ from: 0, to: 100_000, value: 0 }],
   speedLimits: [{ from: 0, to: 100_000, value: 40 }],
   curvatures: [{ from: 0, to: 100_000, value: 0 }],
+  signals: [],
 };
 
 // A synthetic, uniformly steep climbing grade — steep enough that a full-service
@@ -21,6 +22,7 @@ const steepRoute: Route = {
   grades: [{ from: 0, to: 100_000, value: 0.12 }],
   speedLimits: [{ from: 0, to: 100_000, value: 40 }],
   curvatures: [{ from: 0, to: 100_000, value: 0 }],
+  signals: [],
 };
 
 function drive(
