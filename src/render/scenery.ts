@@ -1,14 +1,30 @@
-// Lineside scenery & terrain (impure Three.js, screenshot-verified). The start
-// of a richer world: rolling hills on the horizon, clumps of trees, an overbridge
-// across the line, sloped cutting/embankment banks, and a few people on the
-// platforms. Everything is built ONCE from instanced/simple geometry with no
-// per-frame allocation; it is static (the global env lighting does the rest).
+// Lineside scenery (impure Three.js, screenshot-verified). The faked relief is
+// GONE: the real terrain ribbon (terrain-mesh.ts) now carves cuttings, carries
+// embankments and raises the hills, so the old cone-"hills" and sloped-box
+// `addBank` cuttings/embankments are deleted. What remains is genuine lineside
+// PROPS — tree clumps, road overbridges and platform people — every one placed
+// through the PURE curvilinear core so it follows the bent, undulating line:
 //
-// Coordinate convention (matches scene.ts): world +Z = chainage (forward),
-// x = ±lateral from the track centre (x = 0), y ≥ 0 up.
+//   (x, z, heading) ← placeOnCentreline(route, s, d)   (D21: math heading; the
+//                                                        Three +π facing is applied
+//                                                        render-side where needed)
+//   ground Y        ← anchorY(route, s, d, clearance)   (props sit ON the terrain)
+//
+// Props avoid the open viaduct valley (`viaductSpanAt`) and the render-omitted
+// tunnel bore corridor (`boreCorridorAt`) so nothing floats over the gap or sits
+// inside the bore. Everything is built ONCE from instanced/simple geometry with
+// ZERO per-frame allocation; it is static (the global env lighting does the rest).
+//
+// LOD note (for scene.ts / R3): true runtime LOD needs the eye position, which
+// scenery does not have at build time (props are placed once at static (s,d)).
+// `lodForDistance` is therefore a render-time tool, not a build-time one; here we
+// keep the cheap instanced builds and simply place fewer props far from the track.
+// If per-prop runtime LOD is wanted, scene.ts owns the camera and can cull groups.
 
 import * as THREE from "three";
 import type { Route } from "../sim/route";
+import { placeOnCentreline } from "../sim/centerline";
+import { anchorY, formationHeight, viaductSpanAt, boreCorridorAt } from "../sim/terrain";
 
 /** Deterministic PRNG (mulberry32) so scenery placement is stable run-to-run. */
 function makeRng(seed: number): () => number {
@@ -22,10 +38,10 @@ function makeRng(seed: number): () => number {
 }
 
 const TMP_M = new THREE.Matrix4();
-const TMP_Q = new THREE.Quaternion();
 const TMP_P = new THREE.Vector3();
 const TMP_S = new THREE.Vector3();
 const NOROT = new THREE.Quaternion();
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 /** Place instance `i` of `mesh` at a position/scale (no rotation). */
 function placeBox(mesh: THREE.InstancedMesh, i: number, x: number, y: number, z: number, sx: number, sy: number, sz: number): void {
@@ -33,67 +49,66 @@ function placeBox(mesh: THREE.InstancedMesh, i: number, x: number, y: number, z:
   mesh.setMatrixAt(i, TMP_M);
 }
 
-/** Build all scenery + terrain features under `scene`. */
+/**
+ * Build all lineside props under `scene`, every one positioned through the pure
+ * curvilinear core so it follows the real (curved, undulating) line and sits on
+ * the real terrain. The flat ground, cone hills and faked banks are gone (the
+ * terrain ribbon provides the relief). Built ONCE; no per-frame allocation.
+ *
+ * Signature unchanged from the straight-line version so scene.ts (R3) keeps its
+ * `buildScenery(scene, route, gauge)` call site; `gauge` sizes the track-edge
+ * clearances. LOD is render-time (needs the eye) — see the file header.
+ */
 export function buildScenery(scene: THREE.Scene, route: Route, gauge: number): void {
-  buildHills(scene, route.length);
-  buildTrees(scene, route.length, gauge);
-  buildCuttingsAndEmbankments(scene, route.length, gauge);
-  buildOverbridge(scene, gauge, 2300, 0x6b5747); // brick road overbridge
-  buildOverbridge(scene, gauge, 5050, 0x53585f); // a concrete one further on
+  buildTrees(scene, route, gauge);
+  // A couple of road overbridges at sensible places on the route (an Ashcombe-area
+  // brick bridge and a concrete one further into the suburb run). Chainages chosen
+  // on straight, normal spans — clear of the viaduct valley and the tunnel hill.
+  buildOverbridge(scene, route, gauge, 3000, 0x6b5747); // brick road overbridge (Ashcombe)
+  buildOverbridge(scene, route, gauge, 4000, 0x53585f); // a concrete one further on
   buildPlatformPeople(scene, route, gauge);
 }
 
-/** Rolling hills on the horizon, both sides, well back so fog hazes them. */
-function buildHills(scene: THREE.Scene, len: number): void {
-  const rnd = makeRng(1337);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x47553a, roughness: 1 });
-  const per = 26; // hills per side
-  const hills = new THREE.InstancedMesh(new THREE.ConeGeometry(1, 1, 10), mat, per * 2);
-  let i = 0;
-  for (const side of [-1, 1] as const) {
-    for (let k = 0; k < per; k++) {
-      const z = (k + 0.5) * (len / per) + (rnd() - 0.5) * 120;
-      const x = side * (230 + rnd() * 220);
-      const r = 90 + rnd() * 120;
-      const h = 40 + rnd() * 90;
-      // A squashed cone reads as a smooth hill; sink the base below ground.
-      TMP_M.compose(TMP_P.set(x, h / 2 - 8, z), NOROT, TMP_S.set(r, h, r));
-      hills.setMatrixAt(i++, TMP_M);
-    }
-  }
-  hills.instanceMatrix.needsUpdate = true;
-  hills.frustumCulled = false;
-  scene.add(hills);
-}
-
-/** Clumps of trees both sides: a trunk mesh + a foliage mesh, instanced. */
-function buildTrees(scene: THREE.Scene, len: number, gauge: number): void {
+/**
+ * Clumps of trees both sides: a trunk mesh + a foliage mesh, instanced. Each tree
+ * is placed at a curvilinear (s, d): `placeOnCentreline` gives world (x, z) and
+ * the base Y comes from `anchorY(s, d, 0)` so the trunk meets the actual ground
+ * (cutting floor, embankment top, hill flank). Trees that would land over the
+ * open viaduct valley or inside the tunnel bore corridor are skipped.
+ */
+function buildTrees(scene: THREE.Scene, route: Route, gauge: number): void {
+  const len = route.length;
   const rnd = makeRng(8675309);
   const N = 360;
   const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3a28, roughness: 1 });
   const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.26, 1, 6), trunkMat, N);
   const foliageMat = new THREE.MeshStandardMaterial({ color: 0x33602f, roughness: 1, flatShading: true });
   const foliage = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), foliageMat, N);
-  const minX = gauge / 2 + 7; // clear of the track / fence
+  const minD = gauge / 2 + 7; // clear of the track / fence
   let placed = 0;
   let guard = 0;
   while (placed < N && guard < N * 4) {
     guard++;
-    // Clump: pick a clump centre, then jitter around it for a natural cluster.
-    const cz = rnd() * len;
+    // Clump: pick a clump centre (chainage cs, side), then jitter for a cluster.
+    const cs = rnd() * len;
     const side = rnd() < 0.5 ? -1 : 1;
-    const cx = side * (minX + rnd() * rnd() * 150);
+    // Lateral offset of the clump centre; the rnd()*rnd() bias keeps most clumps
+    // near the line (denser close in, sparser far out — a cheap distance falloff).
+    const cd = side * (minD + rnd() * rnd() * 150);
     const clump = 3 + Math.floor(rnd() * 5);
     for (let c = 0; c < clump && placed < N; c++) {
-      const z = cz + (rnd() - 0.5) * 28;
-      const x = cx + (rnd() - 0.5) * 22;
-      if (Math.abs(x) < minX || z < 0 || z > len) continue;
+      const s = cs + (rnd() - 0.5) * 28;
+      const d = cd + (rnd() - 0.5) * 22;
+      if (Math.abs(d) < minD || s < 0 || s > len) continue;
+      // Skip the open valley (no ground to stand on) and the bore corridor.
+      if (viaductSpanAt(route, s) || boreCorridorAt(route, s, d)) continue;
+      const place = placeOnCentreline(route, s, d);
+      const baseY = anchorY(route, s, d, 0); // trunk foot ON the terrain
       const h = 4 + rnd() * 7; // tree height, m
       const trunkH = h * 0.45;
-      placeBox(trunks, placed, x, trunkH / 2, z, 1, trunkH, 1);
+      placeBox(trunks, placed, place.x, baseY + trunkH / 2, place.z, 1, trunkH, 1);
       const fr = h * 0.42; // foliage radius
-      // Slight per-tree colour variation via instance scale only (keep one mat);
-      TMP_M.compose(TMP_P.set(x, trunkH + fr * 0.7, z), NOROT, TMP_S.set(fr, fr * 1.25, fr));
+      TMP_M.compose(TMP_P.set(place.x, baseY + trunkH + fr * 0.7, place.z), NOROT, TMP_S.set(fr, fr * 1.25, fr));
       foliage.setMatrixAt(placed, TMP_M);
       placed++;
     }
@@ -112,60 +127,28 @@ function buildTrees(scene: THREE.Scene, len: number, gauge: number): void {
 }
 
 /**
- * Vary the lineside profile: a CUTTING (grass banks rising on both sides, close
- * in) over one stretch and an EMBANKMENT (banks falling away from a raised
- * formation) over another. Built from long sloped boxes — a cheap stand-in for a
- * proper terrain heightfield (the next step).
+ * A road overbridge crossing the line at chainage `s`: deck, two abutments,
+ * parapets. The whole bridge is a Group placed and rotated by `placeOnCentreline`
+ * so it spans the formation square to the (possibly curved) track, with deck and
+ * abutment heights taken relative to `formationHeight(s)` (the rail top). Skipped
+ * if the chainage falls in the viaduct valley or tunnel band (no road there).
  */
-function buildCuttingsAndEmbankments(scene: THREE.Scene, len: number, gauge: number): void {
-  const grass = new THREE.MeshStandardMaterial({ color: 0x55633c, roughness: 1, side: THREE.DoubleSide });
-  const earth = new THREE.MeshStandardMaterial({ color: 0x5a4d36, roughness: 1, side: THREE.DoubleSide });
-
-  // Cutting: z 700→1300, banks rise from the track shoulder up and outward.
-  addBank(scene, grass, 700, 1300, gauge / 2 + 2.5, +1, +0.7); // right bank rises
-  addBank(scene, grass, 700, 1300, -(gauge / 2 + 2.5), -1, +0.7); // left bank rises
-
-  // Embankment: z 3300→4000, the formation is raised; banks fall away outward.
-  addBank(scene, earth, 3300, 4000, gauge / 2 + 1.5, +1, -0.6); // right bank falls
-  addBank(scene, earth, 3300, 4000, -(gauge / 2 + 1.5), -1, -0.6); // left bank falls
-  void len;
-}
-
-/**
- * One long sloped bank running z0→z1 along the track, its inner edge at xInner.
- * `dir` (+1 right / −1 left) is the outward direction; `slope` > 0 rises outward
- * (cutting), < 0 falls outward (embankment). A single rotated box face.
- */
-function addBank(
-  scene: THREE.Scene,
-  mat: THREE.MeshStandardMaterial,
-  z0: number,
-  z1: number,
-  xInner: number,
-  dir: 1 | -1,
-  slope: number,
-): void {
-  const length = z1 - z0;
-  const width = 14; // bank face width, m
-  const geo = new THREE.PlaneGeometry(width, length);
-  const bank = new THREE.Mesh(geo, mat);
-  // Plane defaults to facing +Z (in XY); lay it down and tilt it as a bank.
-  bank.rotation.x = -Math.PI / 2; // flat on the ground
-  bank.rotation.y = dir * slope; // tilt across the track axis → sloped bank
-  const rise = (width / 2) * Math.abs(slope) * (slope > 0 ? 1 : -1);
-  bank.position.set(xInner + dir * (width / 2) * Math.cos(slope), Math.max(0.05, rise * 0.5 + 0.05), (z0 + z1) / 2);
-  scene.add(bank);
-}
-
-/** A road overbridge crossing the line: deck, two abutments, parapets. */
-function buildOverbridge(scene: THREE.Scene, gauge: number, z: number, color: number): void {
+function buildOverbridge(scene: THREE.Scene, route: Route, gauge: number, s: number, color: number): void {
+  if (s < 0 || s > route.length) return;
+  if (viaductSpanAt(route, s) || boreCorridorAt(route, s, 0)) return;
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
   const span = 16; // total width across the formation, m
-  const deckY = 6.2;
+  const railTop = formationHeight(route, s); // rail/deck top at this chainage
+  const deckClear = 6.2; // soffit/deck height above the rail top, m
+  const deckY = railTop + deckClear;
   const deckThick = 0.7;
+  const place = placeOnCentreline(route, s, 0);
+
   const g = new THREE.Group();
-  g.position.set(0, 0, z);
-  // Deck.
+  g.position.set(place.x, 0, place.z);
+  g.quaternion.setFromAxisAngle(Y_AXIS, place.heading); // align the bridge to the track
+
+  // Deck (long axis across the track = local X; spans over the line along local Z).
   const deck = new THREE.Mesh(new THREE.BoxGeometry(span, deckThick, 4.5), mat);
   deck.position.set(0, deckY, 0);
   g.add(deck);
@@ -175,20 +158,26 @@ function buildOverbridge(scene: THREE.Scene, gauge: number, z: number, color: nu
     wall.position.set(0, deckY + 0.85, pz);
     g.add(wall);
   }
-  // Abutments either side of the track.
-  for (const ax of [-(gauge / 2 + 4.5), gauge / 2 + 4.5]) {
-    const ab = new THREE.Mesh(new THREE.BoxGeometry(3, deckY, 5), mat);
-    ab.position.set(ax * 1.6, deckY / 2, 0);
+  // Abutments either side of the track, their feet on the formation.
+  for (const ad of [-(gauge / 2 + 4.5), gauge / 2 + 4.5]) {
+    const ab = new THREE.Mesh(new THREE.BoxGeometry(3, deckClear, 5), mat);
+    ab.position.set(ad * 1.6, railTop + deckClear / 2, 0);
     g.add(ab);
   }
   scene.add(g);
 }
 
-/** A few simple standing figures on each platform. */
+/**
+ * A few simple standing figures on each platform. Each is placed via
+ * `placeOnCentreline` along the platform (so it follows a curved platform) at a
+ * lateral offset onto the +X platform slab, and stood on the slab TOP (which sits
+ * `platTop` above the rail formation — NOT on the natural ground, so the Y is
+ * formation-relative, matching the platform slab buildStation lays down).
+ */
 function buildPlatformPeople(scene: THREE.Scene, route: Route, gauge: number): void {
   const rnd = makeRng(54321);
-  const platformX = gauge / 2 + 0.7 + 1.0; // a little in from the platform edge
-  const platTop = 0.9; // platform surface height
+  const platformD = gauge / 2 + 0.7 + 1.0; // a little in from the platform edge (+X side)
+  const platTop = 0.9; // platform surface height above the formation
   const coats = [0x8a3b32, 0x32506e, 0x35503a, 0x5a4a32, 0x40424a]; // muted clothing
   const total = route.stations.length * 4;
   const bodies = new THREE.InstancedMesh(
@@ -204,15 +193,17 @@ function buildPlatformPeople(scene: THREE.Scene, route: Route, gauge: number): v
   const col = new THREE.Color();
   let i = 0;
   for (const st of route.stations) {
+    const base = formationHeight(route, st.chainage) + platTop; // slab top at the station
     const n = 4;
     for (let k = 0; k < n; k++) {
-      const z = st.chainage + (rnd() - 0.5) * 2 * (st.platformHalf - 12);
-      const x = platformX + (rnd() - 0.5) * 1.4;
-      TMP_M.compose(TMP_P.set(x, platTop + 0.85, z), NOROT, TMP_S.set(1, 1, 1));
+      const s = st.chainage + (rnd() - 0.5) * 2 * (st.platformHalf - 12);
+      const d = platformD + (rnd() - 0.5) * 1.4;
+      const place = placeOnCentreline(route, s, d);
+      TMP_M.compose(TMP_P.set(place.x, base + 0.85, place.z), NOROT, TMP_S.set(1, 1, 1));
       bodies.setMatrixAt(i, TMP_M);
       const c = coats[k % coats.length] ?? 0x808080;
       bodies.setColorAt(i, col.setHex(c));
-      TMP_M.compose(TMP_P.set(x, platTop + 1.55, z), NOROT, TMP_S.set(1, 1, 1));
+      TMP_M.compose(TMP_P.set(place.x, base + 1.55, place.z), NOROT, TMP_S.set(1, 1, 1));
       heads.setMatrixAt(i, TMP_M);
       i++;
     }
@@ -222,5 +213,4 @@ function buildPlatformPeople(scene: THREE.Scene, route: Route, gauge: number): v
   heads.instanceMatrix.needsUpdate = true;
   scene.add(bodies);
   scene.add(heads);
-  void TMP_Q;
 }

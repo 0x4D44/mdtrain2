@@ -17,7 +17,7 @@ import {
 import { createInitialAws, tickAws } from "./sim/aws";
 import { createInitialState, step } from "./sim/simulation";
 import { EMU_GTO_4CAR } from "./sim/train";
-import { WESTFORD_EASTBANK } from "./sim/route";
+import { KINGSGATE_SEAHAVEN } from "./sim/route";
 import {
   DEFAULT_ENVIRONMENT,
   environmentParams,
@@ -43,7 +43,7 @@ import { qualityFor } from "./render/quality";
 const app = document.getElementById("app");
 if (!app) throw new Error("#app not found");
 
-const route = WESTFORD_EASTBANK;
+const route = KINGSGATE_SEAHAVEN;
 const spec = EMU_GTO_4CAR;
 
 // Read the accessibility / device hints once (HLD §2.8): reduced-motion gates
@@ -68,7 +68,15 @@ const kb = createKeyboardSource();
 const pad = createGamepadSource();
 const touch = createTouchControls(app);
 
-let state = createInitialState(0);
+// Screenshot/testing affordance: ?s=<chainage> seeds the start position so the
+// 14 km route's set-pieces (Wyre Viaduct ~8050, Stonehead Tunnel ~11700) can be
+// captured without driving there. Absent/invalid ⇒ 0, so default behaviour is
+// unchanged.
+const startParam = Number(new URLSearchParams(location.search).get("s") ?? "");
+const startChainage = Number.isFinite(startParam)
+  ? Math.max(0, Math.min(route.length, startParam))
+  : 0;
+let state = createInitialState(startChainage);
 let controls = createInitialControls();
 let safety = createInitialSafety();
 let aws = createInitialAws();

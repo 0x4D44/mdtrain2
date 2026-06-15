@@ -1,13 +1,13 @@
 {
   "name": "mdtrain2",
   "private": true,
-  "version": "0.10.0",
+  "version": "0.11.0",
   "type": "module",
   "description": "An improved UK EMU cab simulator — a rainy GTO drive (day/sunset/night) on a tested sim core.",
   "engines": { "node": ">=18.0.0" },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/check-dist.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
