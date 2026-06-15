@@ -84,10 +84,18 @@ describe("ENV5: finite outputs, μ ≥ 0.15, rain/wetness ∈ [0,1]", () => {
           p.groundColor,
           p.rainIntensity,
           p.railWetness,
+          // new scalar realism fields (sunDir is a vector — checked below)
+          p.exposure,
+          p.bloomStrength,
+          p.sunColorPbr,
         ];
         for (const v of all) {
           expect(Number.isFinite(v)).toBe(true);
         }
+        // sunDir is a vector, not a number slot — check its components.
+        expect(Number.isFinite(p.sunDir.x)).toBe(true);
+        expect(Number.isFinite(p.sunDir.y)).toBe(true);
+        expect(Number.isFinite(p.sunDir.z)).toBe(true);
         expect(p.mu).toBeGreaterThanOrEqual(0.15);
         expect(p.rainIntensity).toBeGreaterThanOrEqual(0);
         expect(p.rainIntensity).toBeLessThanOrEqual(1);
@@ -117,6 +125,89 @@ describe("ENV5: finite outputs, μ ≥ 0.15, rain/wetness ∈ [0,1]", () => {
     expect(Math.abs(min - 0.16)).toBeLessThan(1e-9);
     expect(argmin).toEqual({ time: "night", weather: "storm" });
     expect(min).toBeGreaterThan(0.15); // floor is a guard below the in-domain min
+  });
+});
+
+describe("O10: exposure & bloomStrength ordered (documented direction)", () => {
+  // exposure is a function of time only: brighter daylight ⇒ higher exposure.
+  // Documented order: day > dusk > night (more daylight ⇒ pull exposure up).
+  it("exposure strictly decreases day → dusk → night (for every weather)", () => {
+    for (const weather of WEATHERS) {
+      const day = environmentParams({ time: "day", weather }).exposure;
+      const dusk = environmentParams({ time: "dusk", weather }).exposure;
+      const night = environmentParams({ time: "night", weather }).exposure;
+      expect(day).toBeGreaterThan(dusk);
+      expect(dusk).toBeGreaterThan(night);
+    }
+  });
+
+  // bloomStrength is per time×weather. Documented order: darker time ⇒ more bloom
+  // (lamp halos read in the dark), so for a fixed weather night > dusk > day; and
+  // night×rain is the GLOBAL maximum (the signature wet-night lamp halos).
+  it("bloomStrength strictly increases day → dusk → night (for every weather)", () => {
+    for (const weather of WEATHERS) {
+      const day = environmentParams({ time: "day", weather }).bloomStrength;
+      const dusk = environmentParams({ time: "dusk", weather }).bloomStrength;
+      const night = environmentParams({ time: "night", weather }).bloomStrength;
+      expect(dusk).toBeGreaterThan(day);
+      expect(night).toBeGreaterThan(dusk);
+    }
+  });
+
+  it("night×rain is the unique strongest bloomStrength over the whole domain", () => {
+    const target = environmentParams({ time: "night", weather: "rain" }).bloomStrength;
+    for (const time of TIMES) {
+      for (const weather of WEATHERS) {
+        if (time === "night" && weather === "rain") continue;
+        const b = environmentParams({ time, weather }).bloomStrength;
+        expect(b).toBeLessThan(target);
+      }
+    }
+  });
+});
+
+describe("O11: sunDir is a unit vector everywhere", () => {
+  it("|sunDir| === 1 (≤1e-9) for every time × weather", () => {
+    for (const time of TIMES) {
+      for (const weather of WEATHERS) {
+        const { sunDir } = environmentParams({ time, weather });
+        const len = Math.sqrt(
+          sunDir.x * sunDir.x + sunDir.y * sunDir.y + sunDir.z * sunDir.z,
+        );
+        expect(Math.abs(len - 1)).toBeLessThanOrEqual(1e-9);
+      }
+    }
+  });
+});
+
+describe("O12: new fields pure & finite across the domain", () => {
+  it("exposure>0, bloomStrength≥0, sunColorPbr & sunDir finite for every Environment", () => {
+    for (const time of TIMES) {
+      for (const weather of WEATHERS) {
+        const p = environmentParams({ time, weather });
+        expect(Number.isFinite(p.exposure)).toBe(true);
+        expect(p.exposure).toBeGreaterThan(0);
+        expect(Number.isFinite(p.bloomStrength)).toBe(true);
+        expect(p.bloomStrength).toBeGreaterThanOrEqual(0);
+        expect(Number.isFinite(p.sunColorPbr)).toBe(true);
+        expect(Number.isFinite(p.sunDir.x)).toBe(true);
+        expect(Number.isFinite(p.sunDir.y)).toBe(true);
+        expect(Number.isFinite(p.sunDir.z)).toBe(true);
+      }
+    }
+  });
+
+  it("is a pure function — same input gives an equal result", () => {
+    for (const time of TIMES) {
+      for (const weather of WEATHERS) {
+        const a = environmentParams({ time, weather });
+        const b = environmentParams({ time, weather });
+        expect(a.exposure).toBe(b.exposure);
+        expect(a.bloomStrength).toBe(b.bloomStrength);
+        expect(a.sunColorPbr).toBe(b.sunColorPbr);
+        expect(a.sunDir).toEqual(b.sunDir);
+      }
+    }
   });
 });
 

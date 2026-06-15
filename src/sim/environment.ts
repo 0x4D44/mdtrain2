@@ -40,6 +40,15 @@ export interface EnvironmentParams {
   railWetness: number;
   /** wiper sweeps iff it's raining. */
   wiperOn: boolean;
+  // realism palette (HLD §2.3) — consumed by scene.ts; pure numbers/hex/unit-vec.
+  /** `toneMappingExposure` per time-of-day. Finite > 0; day > dusk > night (O10). */
+  exposure: number;
+  /** UNIT sun/moon direction per time-of-day (|sunDir| = 1, O11). */
+  sunDir: { x: number; y: number; z: number };
+  /** hex — linear-ish PBR sun/moon colour per time-of-day. */
+  sunColorPbr: number;
+  /** per time×weather bloom strength. Finite ≥ 0; night×rain strongest (O10). */
+  bloomStrength: number;
 }
 
 /** The default setting and the ring's first entry — a bright, clearly-visible
@@ -115,6 +124,64 @@ const clamp = (x: number, lo: number, hi: number): number =>
   x < lo ? lo : x > hi ? hi : x;
 
 /**
+ * `toneMappingExposure` per time-of-day (HLD §2.3). More daylight ⇒ higher
+ * exposure: day > dusk > night (O10). All finite > 0.
+ */
+const EXPOSURE: Record<TimeOfDay, number> = {
+  day: 1.0,
+  dusk: 0.85,
+  night: 0.65,
+};
+
+/**
+ * Raw (un-normalised) sun/moon direction per time-of-day. `environmentParams`
+ * normalises these so |sunDir| = 1 exactly (O11). High warm sun by day, low
+ * golden sun at dusk, a cooler high moon at night — all pointing toward the
+ * light source (the convention scene.ts's DirectionalLight expects).
+ */
+const SUN_DIR_RAW: Record<TimeOfDay, { x: number; y: number; z: number }> = {
+  day: { x: -0.3, y: 0.92, z: 0.25 },
+  dusk: { x: -0.8, y: 0.25, z: 0.1 },
+  night: { x: 0.2, y: 0.55, z: -0.4 },
+};
+
+/** Linear-ish PBR sun/moon colour per time: warm-white day, orange dusk, cool moon. */
+const SUN_COLOR_PBR: Record<TimeOfDay, number> = {
+  day: 0xfff4e0,
+  dusk: 0xff9442,
+  night: 0x7d92c4,
+};
+
+/**
+ * Bloom strength factors. `bloomStrength = darkness[time] × wetGlow[weather]`.
+ * Darker times bloom more (lamp halos read in the dark), so night > dusk > day
+ * for any fixed weather. `wetGlow` peaks at *rain* (not storm): wet streets and
+ * lamp halos glow strongest in steady rain, while a storm's heavier downpour
+ * slightly veils the lights. Both factors strictly increase toward night×rain,
+ * so night×rain is the unique global maximum (O10).
+ */
+const darknessBloom: Record<TimeOfDay, number> = {
+  day: 0.2,
+  dusk: 0.5,
+  night: 1.0,
+};
+const wetGlowBloom: Record<Weather, number> = {
+  clear: 0.6,
+  storm: 0.85,
+  rain: 1.0,
+};
+
+/** Normalise a raw direction to a unit vector (|v| = 1 within 1e-12). */
+function unit(v: { x: number; y: number; z: number }): {
+  x: number;
+  y: number;
+  z: number;
+} {
+  const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  return { x: v.x / len, y: v.y / len, z: v.z / len };
+}
+
+/**
  * Map an environment to physics + visual parameters (HLD §2.1).
  *
  * - μ = clamp(weatherBase[weather] × timeFactor[time], ≥ 0.15). The exact round
@@ -153,6 +220,13 @@ export function environmentParams(env: Environment): EnvironmentParams {
   const fogNear = 14 + 12 * dayness; // 14 (night) .. 26 (day)
   const fogFar = 90 + 230 * dayness - 50 * storminess; // open day, tighter storm/night
 
+  // Realism palette (HLD §2.3). exposure & sun colour/dir depend on time only;
+  // bloom on time×weather. sunDir is normalised to a unit vector (O11).
+  const exposure = EXPOSURE[env.time];
+  const sunDir = unit(SUN_DIR_RAW[env.time]);
+  const sunColorPbr = SUN_COLOR_PBR[env.time];
+  const bloomStrength = darknessBloom[env.time] * wetGlowBloom[env.weather];
+
   return {
     mu,
     skyColor,
@@ -167,6 +241,10 @@ export function environmentParams(env: Environment): EnvironmentParams {
     rainIntensity,
     railWetness,
     wiperOn,
+    exposure,
+    sunDir,
+    sunColorPbr,
+    bloomStrength,
   };
 }
 

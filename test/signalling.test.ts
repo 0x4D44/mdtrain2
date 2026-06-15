@@ -967,27 +967,61 @@ describe("oracle H1: signal-free route ⇒ tickAws returns no reasons", () => {
   });
 });
 
-// ── G3 — determinism grep guard (no wall-clock under src/sim) ─────────────────
+// ── G3 — determinism grep guard (no wall-clock under the pure layer) ──────────
 
-describe("oracle G3: no Date/Math.random/performance.now/setTimeout under src/sim", () => {
-  it("the sim core is free of wall-clock / nondeterministic tokens", () => {
-    // Read every src/sim/*.ts source as raw text. `import.meta.glob` is a Vite
-    // transform that is statically replaced, so it MUST be referenced by its full
-    // literal name (no aliasing). The tsconfig omits the Vite client types, so the
-    // expression is cast.
-    const sources = (
-      import.meta as unknown as {
-        glob: (
-          pattern: string,
-          opts: { query: string; import: string; eager: boolean },
-        ) => Record<string, string>;
-      }
-    ).glob("../src/sim/*.ts", { query: "?raw", import: "default", eager: true });
-    const banned = /Date|Math\.random|performance\.now|setTimeout|setInterval/;
+describe("oracle G3: no Date/Math.random/performance.now/setTimeout in the pure layer", () => {
+  // Strip line (`// … EOL`) and block (`/* … */`) comments so a banned word that
+  // only appears in prose (e.g. "no wall-clock Date") never false-positives.
+  const stripComments = (src: string): string =>
+    src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+
+  // Word/call-boundary-anchored: `\bDate\b` does NOT match `updateDate`, and
+  // `\bMath\.random\b` only fires on the real call. (HLD §2.0/§4 O17, D26.)
+  const banned = /\bDate\b|\bMath\.random\b|\bperformance\.now\b|\bset(Timeout|Interval)\b/;
+
+  // The pure layer spans BOTH src/sim/*.ts AND src/render/quality.ts. A single
+  // `import.meta.glob` reaches both via an ARRAY pattern, merged into one map.
+  // `import.meta.glob` is a Vite transform replaced statically, so it MUST appear
+  // by its literal name (no aliasing); the tsconfig omits the Vite client types,
+  // so the expression is cast (pattern widened to `string | string[]`).
+  const sources = (
+    import.meta as unknown as {
+      glob: (
+        pattern: string | string[],
+        opts: { query: string; import: string; eager: boolean },
+      ) => Record<string, string>;
+    }
+  ).glob(["../src/sim/*.ts", "../src/render/quality.ts"], {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  });
+
+  it("the matcher DOES flag known-bad samples (positive control)", () => {
+    // If these stopped matching, the guard below would be vacuously green.
+    expect(banned.test(stripComments("const t = Date.now();"))).toBe(true);
+    expect(banned.test(stripComments("const r = Math.random();"))).toBe(true);
+    expect(banned.test(stripComments("performance.now();"))).toBe(true);
+    expect(banned.test(stripComments("setTimeout(fn, 0);"))).toBe(true);
+    expect(banned.test(stripComments("setInterval(fn, 0);"))).toBe(true);
+    // …and does NOT flag innocuous identifiers / banned words in comments.
+    expect(banned.test(stripComments("function updateDateLabel() {}"))).toBe(false);
+    expect(banned.test(stripComments("// uses Date and Math.random in prose"))).toBe(false);
+    expect(banned.test(stripComments("/* Date, Math.random, setTimeout */"))).toBe(false);
+  });
+
+  it("globs the whole pure layer (non-vacuous: sim files + quality.ts)", () => {
     const files = Object.keys(sources);
-    expect(files.length).toBeGreaterThan(0); // non-vacuous: it actually read files
-    for (const [path, src] of Object.entries(sources)) {
-      expect(banned.test(src), `${path} contains a banned token`).toBe(false);
+    const simCount = files.filter((p) => /\/src\/sim\/[^/]+\.ts$/.test(p)).length;
+    expect(simCount).toBeGreaterThan(0); // it actually read the sim sources
+    // The render/quality.ts entry is present and counted on top of the sim files.
+    expect(files.some((p) => /\/src\/render\/quality\.ts$/.test(p))).toBe(true);
+    expect(files.length).toBeGreaterThanOrEqual(simCount + 1);
+  });
+
+  it("the pure layer is free of wall-clock / nondeterministic tokens", () => {
+    for (const [path, raw] of Object.entries(sources)) {
+      expect(banned.test(stripComments(raw)), `${path} contains a banned token`).toBe(false);
     }
   });
 });
