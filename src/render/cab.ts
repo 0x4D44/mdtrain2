@@ -50,19 +50,25 @@ const WIPER_AMP = (52 * Math.PI) / 180; // half-sweep amplitude
 const WIPER_CENTRE = (-12 * Math.PI) / 180; // park slightly off-centre
 
 /**
- * Build the cab as children of `camera`. Returns an `update` that binds the
- * meshes to a CabView each frame. Geometry/materials are created once.
+ * Build the cab under `parent` (a train-fixed mount, NOT the camera, so the
+ * driver can look around inside it). The furniture is laid out in the camera's
+ * −Z-is-forward convention, matching the mount's base orientation. `shiftX`
+ * slides the whole cab sideways relative to the eye: a positive value moves the
+ * furniture to the driver's right, seating the driver on the LEFT of the cab so
+ * the centre pillar no longer sits dead ahead. Returns an `update` that binds
+ * the meshes to a CabView each frame. Geometry/materials are created once.
  */
-export function createCab(camera: THREE.Camera): CabHandle {
+export function createCab(parent: THREE.Object3D, shiftX = 0): CabHandle {
   const root = new THREE.Group();
-  // Sit the cab furniture below/around the eye. A Three.js camera looks down its
-  // local −Z, so the cab sits at −Z (in front) and −Y (below) the eye.
-  camera.add(root);
+  root.position.x = shiftX; // seat the driver off-centre (left) within the cab
+  // Sit the cab furniture below/around the eye. The mount looks down its local
+  // −Z, so the cab sits at −Z (in front) and −Y (below) the eye.
+  parent.add(root);
   // A dim, short-range cab light so the dark night furniture reads (without
-  // flooding the wet-night world — range is a couple of metres).
+  // flooding the world — range is a couple of metres).
   const cabLight = new THREE.PointLight(0xffe8c8, 0.9, 3.2);
-  cabLight.position.set(0, 0.15, -0.35);
-  camera.add(cabLight);
+  cabLight.position.set(shiftX, 0.15, -0.35);
+  parent.add(cabLight);
 
   const darkMetal = new THREE.MeshStandardMaterial({ color: 0x14181f, roughness: 0.7, metalness: 0.3 });
   const deskMat = new THREE.MeshStandardMaterial({ color: 0x1b2028, roughness: 0.6, metalness: 0.25 });

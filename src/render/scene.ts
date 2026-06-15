@@ -74,6 +74,41 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   scene.fog = new THREE.Fog(0x05080f, 25, 260);
 
   const camera = new THREE.PerspectiveCamera(70, parent.clientWidth / parent.clientHeight, 0.05, 2000);
+  camera.rotation.order = "YXZ"; // yaw then pitch, for clean look-around
+
+  // ── Look-around: drag with the LEFT mouse button to turn the driver's head
+  //    inside the (train-fixed) cab. Yaw/pitch accumulate per drag, clamped. ──
+  const BASE_YAW = Math.PI; // face +Z (down the line); camera default looks −Z
+  const LOOK_SENS = 0.0042; // rad per pixel dragged
+  let lookYaw = 0;
+  let lookPitch = 0;
+  let dragging = false;
+  let lastX = 0;
+  let lastY = 0;
+  const canvas = renderer.domElement;
+  canvas.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return; // LMB only
+    dragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    lookYaw -= (e.clientX - lastX) * LOOK_SENS; // drag right → look right
+    lookPitch -= (e.clientY - lastY) * LOOK_SENS; // drag down → look down
+    lastX = e.clientX;
+    lastY = e.clientY;
+    lookYaw = Math.max(-2.4, Math.min(2.4, lookYaw)); // ~±137° (over the shoulder)
+    lookPitch = Math.max(-0.7, Math.min(0.7, lookPitch));
+  });
+  const endDrag = (e: PointerEvent): void => {
+    if (!dragging) return;
+    dragging = false;
+    try { canvas.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+  };
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
 
   // ── Lighting: deepened night (intensities driven by env each frame) ────────
   const hemi = new THREE.HemisphereLight(0x1a2636, 0x03040a, 0.35);
@@ -219,9 +254,14 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   for (const station of route.stations) buildStation(scene, station, gauge);
   buildLineside(scene, route, gauge);
 
-  // ── Cab (children of the camera) ───────────────────────────────────────────
-  const cab = createCab(camera);
-  scene.add(camera); // camera must be in the graph for its children to render
+  // ── Cab: mounted on a train-fixed node (NOT the camera) so look-around turns
+  //    the head inside a fixed cab. The driver sits on the LEFT — the cab is
+  //    slid right so the centre pillar no longer sits dead ahead. ────────────
+  const EYE_X = -0.5; // driver's eye, left of the track centreline
+  const CAB_SHIFT = 0.5; // furniture slid right → pillar to the driver's right
+  const cabMount = new THREE.Group();
+  scene.add(cabMount);
+  const cab = createCab(cabMount, CAB_SHIFT);
 
   const cabView: CabView = {
     powerFrac: 0,
@@ -276,8 +316,13 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   }
 
   function render(view: RenderView): void {
-    camera.position.set(0, 1.9, view.chainage - 0.6);
-    camera.lookAt(0, 1.6, view.chainage + 30);
+    // Eye + cab sit at the same point; the camera adds the look-around offset,
+    // the cab mount stays fixed to the train (base heading only).
+    const eyeZ = view.chainage - 0.6;
+    camera.position.set(EYE_X, 1.9, eyeZ);
+    camera.rotation.set(lookPitch, BASE_YAW + lookYaw, 0);
+    cabMount.position.set(EYE_X, 1.9, eyeZ);
+    cabMount.rotation.set(0, BASE_YAW, 0);
 
     // ── Apply the environment (sky/fog, lights, rain, rail sheen) ────────────
     const env = view.env;
