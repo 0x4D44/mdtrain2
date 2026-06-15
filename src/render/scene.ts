@@ -680,10 +680,17 @@ function buildContactWire(scene: THREE.Scene, route: Route): void {
   for (let i = 0; i < segN; i++) {
     const sMid = Math.min(len, (i + 0.5) * SEG);
     const heading = headingAt(route, sMid);
-    const c = placeOnCentreline(route, sMid, 0);
-    const formY = formationHeight(route, sMid);
     e.set(0, heading, 0);
     q.setFromEuler(e);
+    // Carry the wire only where the masts are: skip it through the tunnel bore (the
+    // shell roofs the line) and over the viaduct gap (no masts there to hang it).
+    if (boreCorridorAt(route, sMid, 0) || viaductSpanAt(route, sMid)) {
+      m.compose(v.set(0, -1000, 0), q, sc);
+      wire.setMatrixAt(i, m);
+      continue;
+    }
+    const c = placeOnCentreline(route, sMid, 0);
+    const formY = formationHeight(route, sMid);
     m.compose(v.set(c.x, formY + 5.9, c.z), q, sc);
     wire.setMatrixAt(i, m);
   }
