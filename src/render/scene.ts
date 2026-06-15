@@ -6,6 +6,7 @@ import type { Route, Station } from "../sim/route";
 import { aspectAt } from "../sim/route";
 import type { EnvironmentParams } from "../sim/environment";
 import { createCab, type CabView } from "./cab";
+import { buildScenery } from "./scenery";
 
 const MPS_TO_MPH = 2.236936;
 
@@ -253,6 +254,7 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   // track centre (x = 0), y ≥ 0 up. Nothing lands behind the camera.
   for (const station of route.stations) buildStation(scene, station, gauge);
   buildLineside(scene, route, gauge);
+  buildScenery(scene, route, gauge); // hills, trees, bridges, banks, people
 
   // ── Cab: mounted on a train-fixed node (NOT the camera) so look-around turns
   //    the head inside a fixed cab. The driver sits on the LEFT — the cab is
