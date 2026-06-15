@@ -1,8 +1,9 @@
 // The thin, deliberately-untested impure shell. Wires keyboard → controls →
 // safety → resolveInputs → step → render → HUD. Contains NO control/safety/HUD
 // arithmetic — every branch that could be wrong lives in a pure, tested function
-// under src/sim. `mu` is derived each frame from the pure `environmentParams(env)`
-// (the default environment pins it to ADHESION.wetNight by calibration — ENV4).
+// under src/sim. `mu` is derived each frame from the pure `environmentParams(env)`:
+// the default (rainy day) pins μ=0.25, and the wet-night preset (night×rain) pins
+// μ=ADHESION.wetNight (0.20) by calibration — ENV4.
 
 import {
   buildHudView,

@@ -27,7 +27,6 @@ import {
   formationHeight,
   terrainHeight,
   boreCorridorAt,
-  macroReliefAt,
 } from "../sim/terrain";
 import type { QualitySettings } from "./quality";
 import { createTextureSet } from "./textures";
@@ -749,10 +748,6 @@ function buildSea(
   sea.rotation.z = heading;
   sea.position.set(c.x, seaY, c.z);
   group.add(sea);
-
-  // Keep macroReliefAt imported usefully: assert the coast is not a tunnel/viaduct
-  // band so the sea plane never clips a set-piece (cheap guard, build-time only).
-  void macroReliefAt(route, sMid);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -766,6 +761,12 @@ function disposeTree(root: THREE.Object3D): void {
     const mesh = obj as Partial<THREE.Mesh> & Partial<THREE.InstancedMesh>;
     if (mesh.geometry && typeof mesh.geometry.dispose === "function") {
       mesh.geometry.dispose();
+    }
+    const mat = mesh.material;
+    if (Array.isArray(mat)) {
+      for (const m of mat) m.dispose();
+    } else if (mat && typeof mat.dispose === "function") {
+      mat.dispose();
     }
   });
 }

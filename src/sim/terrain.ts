@@ -66,8 +66,12 @@ function smoothstep(a: number, b: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** Linear interpolation. */
+/** Linear interpolation. Exact at the endpoints (t=0⇒p, t=1⇒q) so the band
+ *  blends `lerp(_, _, m)`/`lerp(_, _, w)` return the natural ground BIT-EXACTLY
+ *  when fully inside a band (m=1) or fully natural (w=1) — O8/O8c rely on this. */
 function lerp(p: number, q: number, t: number): number {
+  if (t === 0) return p;
+  if (t === 1) return q;
   return p + (q - p) * t;
 }
 

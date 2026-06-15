@@ -209,15 +209,26 @@ describe("O8b — track sits on its bed (no clip)", () => {
   });
 });
 
-describe("O8c — viaduct pier feet land on the ground", () => {
-  it("pier-base Y === terrainHeight(route, s_pier, d_pier) (≤1e-9)", () => {
-    // sampled pier positions across the Wyre band, offset to each side
+describe("O8c — viaduct pier feet land on the valley floor (well below the deck)", () => {
+  it("at each pier (s, ±PIER_OFFSET) the ground is the natural valley, far below formationHeight", () => {
+    // The render drops each pier foot to terrainHeight(route, sPier, dPier) at the
+    // pier-row offset ±PIER_OFFSET (terrain-mesh.ts). The property that makes the
+    // piers genuinely "reach the valley floor": on a viaduct there is NO bore carve,
+    // so that ground is the natural valley AND sits well below the deck. (A self-
+    // comparison terrainHeight===terrainHeight would pin nothing.)
+    const PIER_OFFSET = 2.2; // matches terrain-mesh.ts pier-row lateral offset
+    let sampled = 0;
     for (let s = VIADUCT_CENTER - VIADUCT_HALF; s <= VIADUCT_CENTER + VIADUCT_HALF; s += 80) {
-      for (const d of [-3, 0, 3]) {
-        const pierBaseY = terrainHeight(ROUTE, s, d);
-        expect(pierBaseY).toBeCloseTo(terrainHeight(ROUTE, s, d), 9);
+      if (bandMembership(ROUTE, s) !== 1) continue; // deep in the band: full valley, no carve
+      const deck = formationHeight(ROUTE, s); // the deck the train always runs on
+      for (const d of [-PIER_OFFSET, PIER_OFFSET]) {
+        const floor = terrainHeight(ROUTE, s, d);
+        expect(floor).toBeCloseTo(naturalGround(ROUTE, s, d), 9); // the natural valley ground
+        expect(floor).toBeLessThan(deck - VIADUCT_THRESH); // a genuine drop, not the rail bed
+        sampled++;
       }
     }
+    expect(sampled).toBeGreaterThan(0); // non-vacuous: real piers were evaluated
   });
 });
 
@@ -337,12 +348,17 @@ describe("O-DOMAIN — ribbon s-domain continuity across s=0 and s=length", () =
       const hR = heightAt(ROUTE, s0 + eps);
       expect(Math.abs(hL - hR)).toBeLessThan(0.1);
 
-      // Position advances ≈ 2·eps along the spine over the 2·eps span (no JUMP);
-      // bound is 2·eps + slack, the continuity property (not a derivative test).
+      // JUMP test (not a displacement bound): the spine advances ≈ 2·eps along the
+      // local heading over the 2·eps span; subtract that expected advance and require
+      // the residual ≈ 0. This detects a real discontinuity REGARDLESS of endpoint
+      // curvature (a loose displacement bound could hide a sub-metre jump on a curve).
       const pL = planarPoseAt(ROUTE, s0 - eps);
       const pR = planarPoseAt(ROUTE, s0 + eps);
-      expect(Math.abs(pL.x - pR.x)).toBeLessThan(2 * eps + 0.1);
-      expect(Math.abs(pL.z - pR.z)).toBeLessThan(2 * eps + 0.1);
+      const mid = planarPoseAt(ROUTE, s0);
+      const fwdX = Math.sin(mid.heading); // tangent = (sinψ, cosψ) in (x,z)
+      const fwdZ = Math.cos(mid.heading);
+      expect(Math.abs((pR.x - pL.x) - 2 * eps * fwdX)).toBeLessThan(1e-3);
+      expect(Math.abs((pR.z - pL.z) - 2 * eps * fwdZ)).toBeLessThan(1e-3);
       expect(Math.abs(pL.heading - pR.heading)).toBeLessThan(0.05);
 
       for (const d of [-0.5, 0, 0.5]) {

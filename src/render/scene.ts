@@ -5,8 +5,9 @@
 // furniture placed via placeOnCentreline, an eye-tracking shadow sun, async bloom,
 // and eye-anchored rain. NO spatial math lives here — every position comes from
 // the pure layer; this file only applies Three facing offsets (+π, D21), eases the
-// cab attitude, and re-parameterises materials/lights per frame (ZERO per-frame
-// allocation — geometry/materials/targets are built once).
+// cab attitude, and re-parameterises materials/lights per frame (no per-frame GPU
+// allocation — geometry/materials/render-targets are built once; the pure core
+// returns a few small value objects each frame, but nothing GPU-side is allocated).
 
 import * as THREE from "three";
 // Type-only references to the lazy bloom modules: `import type` keeps them OUT of
@@ -314,8 +315,9 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   let composer: EffectComposer | null = null;
   let bloomPass: UnrealBloomPass | null = null;
   let bloomLoading = false;
+  let bloomFailed = false; // permanent latch: never retry a failed lazy import
   function startBloom(): void {
-    if (bloomLoading || composer) return;
+    if (bloomLoading || composer || bloomFailed) return;
     bloomLoading = true;
     Promise.all([
       import("three/examples/jsm/postprocessing/EffectComposer.js"),
@@ -335,7 +337,9 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
         bloomPass = bloom;
       })
       .catch(() => {
-        // Bloom is purely cosmetic; on any failure we keep the direct path.
+        // Bloom is purely cosmetic; on any failure latch OFF permanently and keep
+        // the direct-to-canvas ACES path — never retry (no per-frame import storm).
+        bloomFailed = true;
         bloomLoading = false;
       });
   }
