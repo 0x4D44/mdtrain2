@@ -53,9 +53,14 @@ describe("ENV3: rain/wiper iff weather !== clear", () => {
   });
 });
 
-describe("ENV4: calibration pin — default μ == ADHESION.wetNight (0.20)", () => {
-  it("default μ is exactly 0.20 within 1e-9 and equals ADHESION.wetNight", () => {
+describe("ENV4: calibration pins", () => {
+  it("default (rainy day) μ is exactly 0.25 within 1e-9", () => {
     const mu = environmentParams(DEFAULT_ENVIRONMENT).mu;
+    expect(Math.abs(mu - 0.25)).toBeLessThan(1e-9);
+  });
+
+  it("the wet-night preset still pins μ == ADHESION.wetNight (0.20)", () => {
+    const mu = environmentParams({ time: "night", weather: "rain" }).mu;
     expect(Math.abs(mu - 0.2)).toBeLessThan(1e-9);
     expect(Math.abs(mu - ADHESION.wetNight)).toBeLessThan(1e-9);
   });

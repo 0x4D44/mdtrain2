@@ -34,19 +34,21 @@ export interface EnvironmentParams {
   wiperOn: boolean;
 }
 
-/** The signature setting and the ring's first entry. */
-export const DEFAULT_ENVIRONMENT: Environment = { time: "night", weather: "rain" };
+/** The default setting and the ring's first entry — a bright, clearly-visible
+ *  rainy day (the wet-night that the project is named for stays one cycle away).
+ */
+export const DEFAULT_ENVIRONMENT: Environment = { time: "day", weather: "rain" };
 
 /**
- * The preset ring the demo key cycles. Signature wet-night first, then a clear
- * night, a wet dusk, and a clear day — back to the head. Used by
- * `cycleEnvironment`; ENV6 walks it back to `DEFAULT_ENVIRONMENT`.
+ * The preset ring the demo/help key cycles. Rainy day first (the visible
+ * default), then a rainy sunset, the moody wet-night, and a clear day — back to
+ * the head. Used by `cycleEnvironment`; ENV6 walks it back to `DEFAULT_ENVIRONMENT`.
  */
 export const PRESET_RING: Environment[] = [
-  { time: "night", weather: "rain" }, // signature wet-night (== DEFAULT_ENVIRONMENT)
-  { time: "night", weather: "clear" },
-  { time: "dusk", weather: "rain" },
-  { time: "day", weather: "clear" },
+  { time: "day", weather: "rain" }, // rainy day — the visible default (== DEFAULT_ENVIRONMENT)
+  { time: "dusk", weather: "rain" }, // rainy sunset
+  { time: "night", weather: "rain" }, // the signature wet-night
+  { time: "day", weather: "clear" }, // clear day
 ];
 
 /** Adhesion floor — μ never drops below this however greasy the rail. */

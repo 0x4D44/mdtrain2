@@ -26,6 +26,7 @@ import {
 } from "./sim/environment";
 import { createScene, type RenderView } from "./render/scene";
 import { createHud } from "./ui/hud";
+import { createHelpPanel } from "./ui/help";
 import { createAudioEngine } from "./audio/engine";
 import { audioParams } from "./audio/params";
 import {
@@ -57,6 +58,7 @@ const quality = qualityFor({
 
 const scene = createScene(app, route, quality);
 const hud = createHud(document.body);
+createHelpPanel(document.body); // top-right controls card; toggles with H
 const audio = createAudioEngine();
 
 // Device-agnostic input producers (HLD §2.8): keyboard owns the edge set, gamepad

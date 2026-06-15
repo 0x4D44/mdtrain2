@@ -1,9 +1,9 @@
 {
   "name": "mdtrain2",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
-  "description": "An improved UK EMU cab simulator — wet-night GTO drive on a tested sim core.",
+  "description": "An improved UK EMU cab simulator — a rainy GTO drive (day/sunset/night) on a tested sim core.",
   "engines": { "node": ">=18.0.0" },
   "scripts": {
     "dev": "vite",
