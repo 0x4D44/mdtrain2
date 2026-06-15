@@ -25,6 +25,8 @@ export interface CabView {
   dra: boolean;
   dsd: boolean;
   penalty: boolean;
+  /** Wiper gate: sweeps when true; eases to park and stops when false. */
+  wiperOn: boolean;
   /** Frame delta, s — advances the wiper sweep. */
   dt: number;
 }
@@ -230,9 +232,15 @@ export function createCab(camera: THREE.Camera): CabHandle {
     // Sunflower: show yellow petals when CAUTION.
     sunPetals.visible = view.sunflower === "CAUTION";
 
-    // Wiper: advance phase off dt, sweep as a sine.
-    wiperPhase += view.dt * WIPER_RATE;
-    wiper.rotation.z = WIPER_CENTRE + Math.sin(wiperPhase) * WIPER_AMP;
+    // Wiper: when on, advance phase off dt and sweep as a sine; when off, hold
+    // the phase and ease the blade toward its park angle (clear weather).
+    if (view.wiperOn) {
+      wiperPhase += view.dt * WIPER_RATE;
+      wiper.rotation.z = WIPER_CENTRE + Math.sin(wiperPhase) * WIPER_AMP;
+    } else {
+      const ease = clamp01(view.dt * 4);
+      wiper.rotation.z = lerp(wiper.rotation.z, WIPER_CENTRE, ease);
+    }
   }
 
   return { update };

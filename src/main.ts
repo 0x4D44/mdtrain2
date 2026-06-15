@@ -1,7 +1,8 @@
-// The thin, deliberately-untested impure shell (§2.10). Wires keyboard →
-// controls → safety → resolveInputs → step → render → HUD. Contains NO
-// control/safety/HUD arithmetic — every branch that could be wrong lives in a
-// pure, tested function under src/sim. `mu` stays hardwired ADHESION.wetNight.
+// The thin, deliberately-untested impure shell. Wires keyboard → controls →
+// safety → resolveInputs → step → render → HUD. Contains NO control/safety/HUD
+// arithmetic — every branch that could be wrong lives in a pure, tested function
+// under src/sim. `mu` is derived each frame from the pure `environmentParams(env)`
+// (the default environment pins it to ADHESION.wetNight by calibration — ENV4).
 
 import {
   buildHudView,
@@ -16,8 +17,9 @@ import {
 } from "./sim/controls";
 import { createInitialAws, tickAws } from "./sim/aws";
 import { createInitialState, step } from "./sim/simulation";
-import { EMU_GTO_4CAR, ADHESION } from "./sim/train";
+import { EMU_GTO_4CAR } from "./sim/train";
 import { WESTFORD_EASTBANK } from "./sim/route";
+import { DEFAULT_ENVIRONMENT, environmentParams, cycleEnvironment } from "./sim/environment";
 import { createScene, type RenderView } from "./render/scene";
 import { createHud } from "./ui/hud";
 import { createAudioEngine } from "./audio/engine";
@@ -36,6 +38,7 @@ let state = createInitialState(0);
 let controls = createInitialControls();
 let safety = createInitialSafety();
 let aws = createInitialAws();
+let env = DEFAULT_ENVIRONMENT;
 
 // Per-frame edge set of just-pressed key codes (keydown ignores auto-repeat so a
 // hold never re-fires a detent; keyup/blur are housekeeping).
@@ -82,9 +85,14 @@ function frame(now: number): void {
   const dt = Math.min((now - last) / 1000, 0.05); // the ONLY wall-clock
   last = now;
 
+  // Demo affordance: KeyE cycles the environment preset ring (NOT a ControlIntent
+  // — it drives no train control, so it's handled here via the pure cycle fn).
+  if (edges.has("KeyE")) env = cycleEnvironment(env);
+  const ep = environmentParams(env);
+
   const intent = intentFromKeys(edges);
   controls = reduceControls(controls, intent, state, safety); // safety = prior frame's
-  const inputs = resolveInputs(controls, safety, ADHESION.wetNight);
+  const inputs = resolveInputs(controls, safety, ep.mu);
   const prevChainage = state.chainage; // pre-step
   state = step(spec, route, state, inputs, dt); // advance FIRST (crossing detection needs prev→now)
   const dir = controls.lastDir; // same authority resolveInputs uses
@@ -100,6 +108,7 @@ function frame(now: number): void {
     safety,
     aws,
     served: aws.served,
+    env: ep,
   };
   scene.render(view);
   hud.update(buildHudView(state, controls, safety, route, aws.served, awsOut.hud));

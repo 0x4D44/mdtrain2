@@ -2,8 +2,9 @@ import * as THREE from "three";
 import type { ControlState, SafetyState } from "../sim/controls";
 import { BRAKE_EMERGENCY, POWER_NOTCHES, penaltyActive } from "../sim/controls";
 import type { AwsState } from "../sim/aws";
-import type { Route } from "../sim/route";
+import type { Route, Station } from "../sim/route";
 import { aspectAt } from "../sim/route";
+import type { EnvironmentParams } from "../sim/environment";
 import { createCab, type CabView } from "./cab";
 
 const MPS_TO_MPH = 2.236936;
@@ -17,10 +18,13 @@ export interface RenderView {
   safety: SafetyState;
   aws: AwsState;
   served: ReadonlySet<string>;
+  /** Time-of-day × weather visual params (projected in main.ts). */
+  env: EnvironmentParams;
 }
 
 export interface SceneHandle {
-  /** Project sim state into the wet-night cab view and render it. */
+  /** Project sim state into the cab view and render the world under the
+   *  current environment (wet-night is merely the default). */
   render(view: RenderView): void;
   resize(): void;
 }
@@ -59,8 +63,9 @@ export function createScene(parent: HTMLElement, route: Route): SceneHandle {
 
   const camera = new THREE.PerspectiveCamera(70, parent.clientWidth / parent.clientHeight, 0.05, 2000);
 
-  // ── Lighting: deepened night ───────────────────────────────────────────────
-  scene.add(new THREE.HemisphereLight(0x1a2636, 0x03040a, 0.35));
+  // ── Lighting: deepened night (intensities driven by env each frame) ────────
+  const hemi = new THREE.HemisphereLight(0x1a2636, 0x03040a, 0.35);
+  scene.add(hemi);
   const moon = new THREE.DirectionalLight(0x8aa0c8, 0.4);
   moon.position.set(-40, 80, -20);
   scene.add(moon);
@@ -185,18 +190,24 @@ export function createScene(parent: HTMLElement, route: Route): SceneHandle {
   }
   const rainGeo = new THREE.BufferGeometry();
   rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPos, 3));
-  const rain = new THREE.Points(
-    rainGeo,
-    new THREE.PointsMaterial({
-      color: 0x9fb6d8,
-      size: 0.06,
-      transparent: true,
-      opacity: 0.5,
-      depthWrite: false,
-    }),
-  );
+  const rainMat = new THREE.PointsMaterial({
+    color: 0x9fb6d8,
+    size: 0.06,
+    transparent: true,
+    opacity: 0.5,
+    depthWrite: false,
+  });
+  const rain = new THREE.Points(rainGeo, rainMat);
   rain.frustumCulled = false;
   scene.add(rain);
+
+  // ── Stations + lineside scenery (built once; instanced where it pays) ──────
+  // Coordinate convention (HLD §2.2): world +Z = toward Eastbank (increasing
+  // chainage); the camera sits at z = chainage − 0.6 looking toward +Z. Every
+  // lineside/station object lives at z = its chainage, x = ±offset from the
+  // track centre (x = 0), y ≥ 0 up. Nothing lands behind the camera.
+  for (const station of route.stations) buildStation(scene, station, gauge);
+  buildLineside(scene, route, gauge);
 
   // ── Cab (children of the camera) ───────────────────────────────────────────
   const cab = createCab(camera);
@@ -211,6 +222,7 @@ export function createScene(parent: HTMLElement, route: Route): SceneHandle {
     dra: false,
     dsd: false,
     penalty: false,
+    wiperOn: true,
     dt: 0,
   };
 
@@ -257,8 +269,21 @@ export function createScene(parent: HTMLElement, route: Route): SceneHandle {
     camera.position.set(0, 1.9, view.chainage - 0.6);
     camera.lookAt(0, 1.6, view.chainage + 30);
 
+    // ── Apply the environment (sky/fog, lights, rain, rail sheen) ────────────
+    const env = view.env;
+    (scene.background as THREE.Color).setHex(env.skyColor);
+    const fog = scene.fog as THREE.Fog;
+    fog.color.setHex(env.skyColor);
+    fog.near = env.fogNear;
+    fog.far = env.fogFar;
+    hemi.intensity = env.ambientIntensity;
+    moon.intensity = env.moonIntensity;
+    rainMat.opacity = env.rainIntensity;
+    railMat.roughness = lerp(0.35, 0.08, env.railWetness);
+
     updateSignals(view);
-    updateRain(view);
+    // Skip the rain scroll loop entirely when it isn't raining (perf).
+    if (env.rainIntensity > 0) updateRain(view);
 
     // Project the cab view from sim state.
     const c = view.controls;
@@ -270,6 +295,7 @@ export function createScene(parent: HTMLElement, route: Route): SceneHandle {
     cabView.dra = c.dra;
     cabView.dsd = view.safety.dsdWarning;
     cabView.penalty = penaltyActive(view.safety);
+    cabView.wiperOn = env.wiperOn;
     cabView.dt = view.dt;
     cab.update(cabView);
 
@@ -284,6 +310,207 @@ export function createScene(parent: HTMLElement, route: Route): SceneHandle {
   }
 
   return { render, resize };
+}
+
+/** Scalar lerp (shared by render + scenery builders). */
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+/**
+ * Build one station's structures at its chainage (HLD §2.2): a platform slab to
+ * one side of the running line, a flat canopy on posts, a back wall, an emissive
+ * name board, and ≤ 2 platform lamps (emissive disc + a low-range PointLight).
+ * Built once. The platform sits on the +X side; length ≈ 2 × platformHalf.
+ */
+function buildStation(scene: THREE.Scene, station: Station, gauge: number): void {
+  const z = station.chainage;
+  const len = 2 * station.platformHalf;
+  const platW = 3.0; // platform width, m
+  const platH = 0.9; // platform height, m
+  const innerX = gauge / 2 + 0.7; // platform edge just clear of the running rail
+  const centreX = innerX + platW / 2; // platform centre on the +X side
+
+  const group = new THREE.Group();
+  group.position.set(0, 0, z);
+
+  // Lighter than the lineside furniture so the platform reads against the dark
+  // ground even in the wet-night (the signature, darkest setting).
+  const concrete = new THREE.MeshStandardMaterial({ color: 0x52585f, roughness: 0.9 });
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x2c333c, roughness: 0.85 });
+  const steelMat = new THREE.MeshStandardMaterial({ color: 0x2a313b, roughness: 0.6, metalness: 0.4 });
+
+  // Platform slab.
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(platW, platH, len), concrete);
+  slab.position.set(centreX, platH / 2, 0);
+  group.add(slab);
+
+  // Back wall (behind the platform, away from the track).
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2.6, len), wallMat);
+  wall.position.set(centreX + platW / 2 - 0.1, platH + 1.3, 0);
+  group.add(wall);
+
+  // Canopy: a flat roof on three posts.
+  const canopyY = platH + 3.0;
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(platW, 0.12, len * 0.8), steelMat);
+  canopy.position.set(centreX, canopyY, 0);
+  group.add(canopy);
+  const postGeo = new THREE.BoxGeometry(0.12, canopyY - platH, 0.12);
+  for (const pz of [-len * 0.35, 0, len * 0.35]) {
+    const post = new THREE.Mesh(postGeo, steelMat);
+    post.position.set(centreX - platW / 2 + 0.3, platH + (canopyY - platH) / 2, pz);
+    group.add(post);
+  }
+
+  // Emissive name board (lit blue sign), face toward the track (−X) so an
+  // arriving train reads it. Bright enough to glow as a landmark in the dark.
+  const board = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08, 0.5, 3.2),
+    new THREE.MeshStandardMaterial({
+      color: 0x0a1020,
+      emissive: new THREE.Color(0x3168c0),
+      emissiveIntensity: 2.0,
+      roughness: 0.5,
+    }),
+  );
+  board.position.set(innerX + 0.05, platH + 1.7, 0);
+  group.add(board);
+
+  // ≤ 2 platform lamps: a bright emissive disc + one PointLight each, ranged to
+  // pool warm light onto the platform so the station reads as a lit landmark.
+  const lampGeo = new THREE.CircleGeometry(0.12, 16);
+  const lampMat = new THREE.MeshStandardMaterial({
+    color: 0x101418,
+    emissive: new THREE.Color(0xffe2b0),
+    emissiveIntensity: 2.6,
+    roughness: 0.5,
+  });
+  for (const lz of [-len * 0.3, len * 0.3]) {
+    const disc = new THREE.Mesh(lampGeo, lampMat);
+    disc.position.set(centreX, platH + 3.4, lz);
+    disc.rotation.x = Math.PI / 2; // face down
+    group.add(disc);
+    // Strong, wide pool so the lit platform reads as a landmark even at speed in
+    // the wet-night dark (the most reliable night-station cue is a warm pool).
+    const light = new THREE.PointLight(0xffe2b0, 3.0, 24);
+    light.position.set(centreX, platH + 3.3, lz);
+    group.add(light);
+  }
+
+  scene.add(group);
+}
+
+/**
+ * Build the lineside scenery (HLD §2.2), each class as ONE InstancedMesh built
+ * once with no per-frame allocation: OLE/catenary masts (~45 m), lineside
+ * fencing (both sides), a handful of distant building blocks set well back, and
+ * mileposts (~500 m). All at z = chainage, x = ±offset, y ≥ 0.
+ */
+function buildLineside(scene: THREE.Scene, route: Route, gauge: number): void {
+  const len = route.length;
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const sc = new THREE.Vector3(1, 1, 1);
+  const v = new THREE.Vector3();
+
+  // ── OLE / catenary masts every ~45 m, alternating sides ──────────────────
+  const mastSpacing = 45;
+  const mastN = Math.max(1, Math.floor(len / mastSpacing));
+  const mastX = gauge / 2 + 2.6;
+  // Two instances per mast position (post + cantilever arm), packed into one mesh.
+  const mastMat = new THREE.MeshStandardMaterial({ color: 0x10141a, roughness: 0.7, metalness: 0.5 });
+  const postGeo = new THREE.BoxGeometry(0.18, 6.5, 0.18);
+  const masts = new THREE.InstancedMesh(postGeo, mastMat, mastN);
+  const armGeo = new THREE.BoxGeometry(2.4, 0.12, 0.12);
+  const arms = new THREE.InstancedMesh(armGeo, mastMat, mastN);
+  for (let i = 0; i < mastN; i++) {
+    const z = (i + 1) * mastSpacing;
+    const side = i % 2 === 0 ? 1 : -1;
+    const x = side * mastX;
+    m.compose(v.set(x, 3.25, z), q.set(0, 0, 0, 1), sc);
+    masts.setMatrixAt(i, m);
+    // Cantilever arm reaching in over the track at pantograph height.
+    m.compose(v.set(x - side * 1.2, 6.0, z), q.set(0, 0, 0, 1), sc);
+    arms.setMatrixAt(i, m);
+  }
+  masts.instanceMatrix.needsUpdate = true;
+  arms.instanceMatrix.needsUpdate = true;
+  scene.add(masts);
+  scene.add(arms);
+
+  // Contact wire: one long thin box per running line at pantograph height.
+  const wireMat = new THREE.MeshStandardMaterial({ color: 0x2a2e34, roughness: 0.5, metalness: 0.6 });
+  const wire = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, len), wireMat);
+  wire.position.set(0, 5.9, len / 2);
+  scene.add(wire);
+
+  // ── Lineside fencing: instanced low posts both sides every ~6 m ──────────
+  const fenceSpacing = 6;
+  const fenceN = Math.max(1, Math.floor(len / fenceSpacing));
+  const fenceX = gauge / 2 + 4.5;
+  const fenceMat = new THREE.MeshStandardMaterial({ color: 0x0e1116, roughness: 0.9 });
+  const fenceGeo = new THREE.BoxGeometry(0.06, 1.0, 0.06);
+  const fence = new THREE.InstancedMesh(fenceGeo, fenceMat, fenceN * 2);
+  let fi = 0;
+  for (let i = 0; i < fenceN; i++) {
+    const z = (i + 1) * fenceSpacing;
+    for (const side of [-1, 1] as const) {
+      m.compose(v.set(side * fenceX, 0.5, z), q.set(0, 0, 0, 1), sc);
+      fence.setMatrixAt(fi++, m);
+    }
+  }
+  fence.instanceMatrix.needsUpdate = true;
+  scene.add(fence);
+
+  // ── Distant schematic buildings: a handful of dark blocks set well back ──
+  const blockMat = new THREE.MeshStandardMaterial({ color: 0x0a0d12, roughness: 1 });
+  const winMat = new THREE.MeshStandardMaterial({
+    color: 0x0a0d12,
+    emissive: new THREE.Color(0xffd27a),
+    emissiveIntensity: 0.5,
+    roughness: 0.9,
+  });
+  const blockSpecs = [
+    { z: 700, x: 70, w: 26, h: 22, d: 18 },
+    { z: 1700, x: -85, w: 34, h: 30, d: 22 },
+    { z: 2900, x: 60, w: 22, h: 40, d: 16 },
+    { z: 3600, x: -70, w: 40, h: 18, d: 24 },
+    { z: 4800, x: 90, w: 28, h: 26, d: 20 },
+    { z: 5500, x: -60, w: 30, h: 34, d: 18 },
+  ];
+  const blockGeo = new THREE.BoxGeometry(1, 1, 1);
+  const blocks = new THREE.InstancedMesh(blockGeo, blockMat, blockSpecs.length);
+  const winGeo = new THREE.BoxGeometry(1, 1, 0.3);
+  const windows = new THREE.InstancedMesh(winGeo, winMat, blockSpecs.length);
+  for (let i = 0; i < blockSpecs.length; i++) {
+    const b = blockSpecs[i];
+    if (!b) continue;
+    m.compose(v.set(b.x, b.h / 2, b.z), q.set(0, 0, 0, 1), sc.set(b.w, b.h, b.d));
+    blocks.setMatrixAt(i, m);
+    // One emissive window-strip slab on the track-facing face.
+    const faceX = b.x + (b.x < 0 ? b.w / 2 : -b.w / 2);
+    m.compose(v.set(faceX, b.h * 0.55, b.z), q.set(0, 0, 0, 1), sc.set(b.w * 0.6, b.h * 0.5, 1));
+    windows.setMatrixAt(i, m);
+  }
+  blocks.instanceMatrix.needsUpdate = true;
+  windows.instanceMatrix.needsUpdate = true;
+  scene.add(blocks);
+  scene.add(windows);
+
+  // ── Mileposts every ~500 m: tiny instanced posts beside the line ─────────
+  const postSpacing = 500;
+  const postN = Math.max(1, Math.floor(len / postSpacing));
+  const milepostX = gauge / 2 + 2.0;
+  const milepostMat = new THREE.MeshStandardMaterial({ color: 0xb0b4ba, roughness: 0.8 });
+  const milepostGeo = new THREE.BoxGeometry(0.1, 0.6, 0.1);
+  const mileposts = new THREE.InstancedMesh(milepostGeo, milepostMat, postN);
+  for (let i = 0; i < postN; i++) {
+    const z = (i + 1) * postSpacing;
+    m.compose(v.set(milepostX, 0.3, z), q.set(0, 0, 0, 1), sc.set(1, 1, 1));
+    mileposts.setMatrixAt(i, m);
+  }
+  mileposts.instanceMatrix.needsUpdate = true;
+  scene.add(mileposts);
 }
 
 /** A soft round additive glow texture for the signal halos (built once). */
