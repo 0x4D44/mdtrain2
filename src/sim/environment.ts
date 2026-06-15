@@ -22,10 +22,18 @@ export interface EnvironmentParams {
   skyColor: number;
   fogNear: number;
   fogFar: number;
-  /** hemisphere light. */
+  /** hemisphere light intensity. */
   ambientIntensity: number;
-  /** directional ("moon"/"sun") light. */
+  /** directional sun/moon light intensity. */
   moonIntensity: number;
+  /** hex — hemisphere sky colour (warm/bright by day, cool/dim by night). */
+  hemiSky: number;
+  /** hex — hemisphere ground bounce colour. */
+  hemiGround: number;
+  /** hex — directional sun/moon colour. */
+  sunColor: number;
+  /** hex — the ground plane's base colour (lit grass/ballast by day). */
+  groundColor: number;
   /** 0..1 → particle opacity (& count scale); 0 ⇒ no rain. */
   rainIntensity: number;
   /** 0..1 → rail roughness (wet = lower roughness/sheen). */
@@ -82,11 +90,25 @@ const wetnessByWeather: Record<Weather, number> = {
   storm: 1.0,
 };
 
-/** Brightness multiplier per time of day — strictly increasing night→day. */
-const brightness: Record<TimeOfDay, number> = {
-  night: 0.5,
-  dusk: 0.7,
-  day: 1.0,
+/**
+ * Lighting per time of day: hemisphere sky/ground colours, the sun/moon colour,
+ * their intensities, and the lit ground colour. Tuned so DAY genuinely lights
+ * surfaces (warm, bright, near-neutral) rather than just painting a bright sky,
+ * DUSK is warm and golden, and NIGHT stays cool and moody. Intensities strictly
+ * increase night < dusk < day (ENV2).
+ */
+interface Lighting {
+  hemiSky: number;
+  hemiGround: number;
+  sun: number;
+  ambI: number;
+  sunI: number;
+  ground: number;
+}
+const LIGHTING: Record<TimeOfDay, Lighting> = {
+  day: { hemiSky: 0xdfe9f5, hemiGround: 0x8f9470, sun: 0xfff6e6, ambI: 1.8, sunI: 2.1, ground: 0x5e6a44 },
+  dusk: { hemiSky: 0xf2b079, hemiGround: 0x4a3742, sun: 0xff9a52, ambI: 1.0, sunI: 1.35, ground: 0x40392e },
+  night: { hemiSky: 0x1a2636, hemiGround: 0x03040a, sun: 0x8aa0c8, ambI: 0.45, sunI: 0.6, ground: 0x0e140f },
 };
 
 const clamp = (x: number, lo: number, hi: number): number =>
@@ -109,26 +131,27 @@ export function environmentParams(env: Environment): EnvironmentParams {
   const rainIntensity = rainByWeather[env.weather];
   const railWetness = wetnessByWeather[env.weather];
   const wiperOn = env.weather !== "clear";
-  const b = brightness[env.time];
 
   // Storminess darkens and tightens fog; clear is clearest. 0 (clear) .. 1 (storm).
   const storminess = rainIntensity;
 
-  // Lighting: scale base levels by time-of-day brightness so both ambient and
-  // moon strictly increase night<dusk<day (ENV2). Cloud/storm dims a little.
-  // Ceilings are tuned so "day" genuinely lights surfaces (not just a bright sky)
-  // while night stays moody — the lit platform lamps carry the night stations.
-  const cloudDim = 1 - 0.25 * storminess;
-  const ambientIntensity = 0.85 * b * cloudDim;
-  const moonIntensity = 1.2 * b * cloudDim;
+  // Lighting: per-time colour + intensity preset, knocked back a little under
+  // cloud/rain. Intensities strictly increase night<dusk<day (ENV2) because the
+  // cloud factor depends only on weather, not time.
+  const L = LIGHTING[env.time];
+  const cloudDim = 1 - 0.3 * storminess;
+  const ambientIntensity = L.ambI * cloudDim;
+  const moonIntensity = L.sunI * cloudDim;
 
   // Sky/fog colour: deep blue at night, lighter toward day; greyer (less blue)
   // and tighter range when stormy. Encoded as a single hex RGB.
   const skyColor = skyColorFor(env.time, storminess);
 
-  // Fog: tighter (nearer far plane) at night and in storm; open in clear day.
-  const fogNear = 12 + 8 * b; // 12 (night) .. 20 (day)
-  const fogFar = 60 + 140 * b - 40 * storminess; // deep day-clear, tight storm-night
+  // Fog: open by day, tighter at night and in storm. Generous far plane so the
+  // line and scenery read into the distance.
+  const dayness = env.time === "day" ? 1 : env.time === "dusk" ? 0.6 : 0;
+  const fogNear = 14 + 12 * dayness; // 14 (night) .. 26 (day)
+  const fogFar = 90 + 230 * dayness - 50 * storminess; // open day, tighter storm/night
 
   return {
     mu,
@@ -137,6 +160,10 @@ export function environmentParams(env: Environment): EnvironmentParams {
     fogFar,
     ambientIntensity,
     moonIntensity,
+    hemiSky: L.hemiSky,
+    hemiGround: L.hemiGround,
+    sunColor: L.sun,
+    groundColor: L.ground,
     rainIntensity,
     railWetness,
     wiperOn,

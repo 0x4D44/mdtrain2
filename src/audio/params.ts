@@ -48,13 +48,13 @@ export function audioParams(
   // line speed so whineHz keeps rising, but cap gains separately.
   const speedFrac = speed / LINE_SPEED_MPS;
 
-  // Whine: 60 Hz base + 300 Hz of rise across the speed range. Strictly
-  // increasing in |speed| (linear term guarantees monotonicity); the sqrt
-  // term front-loads the rise for a more believable, eager spool-up while
-  // staying monotonic.
+  // Whine: ~50 Hz hum at a stand rising to ~490 Hz near line speed. Strictly
+  // increasing in |speed| (linear term guarantees monotonicity); the sqrt term
+  // front-loads the rise for a believable, eager spool-up while staying
+  // monotonic. The engine low-passes this so the rise reads as a whine, not buzz.
   const whineHz = finite(
-    60 + 220 * speedFrac + 90 * Math.sqrt(Math.max(speedFrac, 0)),
-    60,
+    50 + 320 * speedFrac + 120 * Math.sqrt(Math.max(speedFrac, 0)),
+    50,
   );
 
   // Traction: the whine is audible under power. Linear in notch, clamped.

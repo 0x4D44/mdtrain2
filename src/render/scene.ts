@@ -82,11 +82,9 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   moon.position.set(-40, 80, -20);
   scene.add(moon);
 
-  // ── Ground ─────────────────────────────────────────────────────────────────
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(400, route.length + 400),
-    new THREE.MeshStandardMaterial({ color: 0x080c0a, roughness: 1 }),
-  );
+  // ── Ground (colour driven by env each frame: lit grass by day, dark by night) ─
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x5e6a44, roughness: 1 });
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, route.length + 400), groundMat);
   ground.rotation.x = -Math.PI / 2;
   ground.position.z = route.length / 2;
   scene.add(ground);
@@ -288,8 +286,12 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
     fog.color.setHex(env.skyColor);
     fog.near = env.fogNear;
     fog.far = env.fogFar;
+    hemi.color.setHex(env.hemiSky);
+    hemi.groundColor.setHex(env.hemiGround);
     hemi.intensity = env.ambientIntensity;
+    moon.color.setHex(env.sunColor);
     moon.intensity = env.moonIntensity;
+    groundMat.color.setHex(env.groundColor);
     rainMat.opacity = env.rainIntensity;
     railMat.roughness = lerp(0.35, 0.08, env.railWetness);
 

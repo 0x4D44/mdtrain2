@@ -55,19 +55,33 @@ export function createAudioEngine(): AudioEngine {
   master.gain.value = MASTER;
   master.connect(ctx.destination);
 
-  // ── Whine: two detuned oscillators (saw + triangle) through a gain ─────────
+  // ── Whine: saw + triangle through a TRACKING low-pass (tames the harsh upper
+  //    harmonics that otherwise "buzz" like a wasp), plus a clean sine
+  //    fundamental for weight. A GTO traction whine, not a fly. ───────────────
   const whineGain = ctx.createGain();
   whineGain.gain.value = 0;
   whineGain.connect(master);
+  const whineLP = ctx.createBiquadFilter();
+  whineLP.type = "lowpass";
+  whineLP.frequency.value = 300;
+  whineLP.Q.value = 5; // gentle formant peak → "motor" character
+  whineLP.connect(whineGain);
   const oscSaw = ctx.createOscillator();
   oscSaw.type = "sawtooth";
   oscSaw.frequency.value = 60;
   const oscTri = ctx.createOscillator();
   oscTri.type = "triangle";
   oscTri.frequency.value = 60;
-  oscTri.detune.value = 7; // slight beat for a richer inverter tone
-  oscSaw.connect(whineGain);
-  oscTri.connect(whineGain);
+  oscTri.detune.value = 6; // slight beat for a richer inverter tone
+  oscSaw.connect(whineLP);
+  oscTri.connect(whineLP);
+  // Clean sine fundamental, bypassing the low-pass, for body/weight.
+  const oscSub = ctx.createOscillator();
+  oscSub.type = "sine";
+  oscSub.frequency.value = 60;
+  const subGain = ctx.createGain();
+  subGain.gain.value = 0.5;
+  oscSub.connect(subGain).connect(whineGain);
 
   // ── Rolling: looping noise through a low-pass, scaled by speed ─────────────
   const noiseBuf = makeNoiseBuffer(ctx);
@@ -99,6 +113,7 @@ export function createAudioEngine(): AudioEngine {
     try {
       oscSaw.start();
       oscTri.start();
+      oscSub.start();
       rollSrc.start();
       hissSrc.start();
     } catch {
@@ -115,9 +130,16 @@ export function createAudioEngine(): AudioEngine {
   function update(p: AudioParams): void {
     set(oscSaw.frequency, p.whineHz);
     set(oscTri.frequency, p.whineHz);
-    // Whine audibility: traction gain, modest level so it sits under the mix.
-    set(whineGain.gain, 0.18 * p.tractionGain);
-    set(rollGain.gain, 0.5 * p.rollGain);
+    set(oscSub.frequency, p.whineHz);
+    // Open the low-pass to a few multiples of the tone so the timbre brightens
+    // with pitch, but the harsh top is always tamed (clamped 220..4000 Hz).
+    const cutoff = Math.min(4000, Math.max(220, p.whineHz * 3.5));
+    set(whineLP.frequency, cutoff);
+    // Whine audibility: traction gain. The sine sub gives it body.
+    set(whineGain.gain, 0.22 * p.tractionGain);
+    // Rolling: louder and brighter as speed rises (rushing rail noise).
+    set(rollFilter.frequency, 300 + 600 * p.rollGain);
+    set(rollGain.gain, 0.6 * p.rollGain);
     set(hissGain.gain, 0.4 * p.brakeHissGain);
   }
 

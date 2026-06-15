@@ -78,6 +78,10 @@ describe("ENV5: finite outputs, μ ≥ 0.15, rain/wetness ∈ [0,1]", () => {
           p.fogFar,
           p.ambientIntensity,
           p.moonIntensity,
+          p.hemiSky,
+          p.hemiGround,
+          p.sunColor,
+          p.groundColor,
           p.rainIntensity,
           p.railWetness,
         ];
