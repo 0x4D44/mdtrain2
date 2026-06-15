@@ -10,9 +10,9 @@
 // Spatial truth comes from the PURE core (no spatial math lives here):
 //   - placeOnCentreline(route, s, d) → world (x,y,z) on the curved spine
 //   - formationHeight(route, s)      → the rail/deck top the train always runs on
-//   - terrainHeight(route, s, d)     → the ground surface (carves the bore, drops
-//                                      to the valley floor under a viaduct)
-//   - boreCorridorAt(route, s, d)    → the near-track corridor to OMIT in a tunnel
+//   - terrainHeight(route, s, d)     → the ground surface (carves the tunnel
+//                                      near-track to the bed, drops to the valley
+//                                      floor under a viaduct)
 //
 // Three 0.183 / D23 colour-space pins are honoured by the R1 textures module; we
 // only wire its maps onto MeshStandardMaterials and set envMapIntensity.
@@ -26,7 +26,6 @@ import {
 import {
   formationHeight,
   terrainHeight,
-  boreCorridorAt,
 } from "../sim/terrain";
 import type { QualitySettings } from "./quality";
 import { createTextureSet } from "./textures";
@@ -217,8 +216,9 @@ export function buildWorld(
  * The terrain ground: ONE unified (s,d) grid built first (positions + UVs +
  * central-difference normals), then sliced into SECTION_LEN sections that SHARE
  * boundary vertices+normals identically (so sections cull independently with no
- * seam/pop). The near-track bore corridor (boreCorridorAt) is OMITTED — its
- * quads are simply not emitted, leaving the trench for the bore shell to cover.
+ * seam/pop). The tunnel bore needs no special cut here: terrainHeight carves the
+ * near-track down to the bed, so the ground forms the solid bore floor that the
+ * dark bore shell roofs over.
  */
 function buildGroundRibbon(
   group: THREE.Group,
@@ -291,8 +291,6 @@ function buildGroundRibbon(
     }
   }
 
-  // Bore-corridor cells are omitted inline in the slicing loop below (per-cell
-  // boreCorridorAt test on the cell midpoint), leaving the trench for the shell.
   const sCellsPerSection = Math.max(1, Math.round(SECTION_LEN / segLen));
 
   // Slice into sections sharing boundary rows. Each section spans s-cell rows
@@ -323,15 +321,15 @@ function buildGroundRibbon(
       }
     }
 
-    // Emit two triangles per cell, OMITTING cells inside the bore corridor.
+    // Emit two triangles per cell. The near-track bore corridor is NOT cut out
+    // here: terrainHeight already CARVES the tunnel near-track down to the bed, so
+    // the ground forms the solid bore FLOOR (not a hill wall), and the dark bore
+    // shell roofs it — together they enclose a drivable bore. (Cutting the corridor
+    // would leave open holes beside the ballast rather than a floor, and the coarse
+    // d-grid would not cut it cleanly anyway.)
     const indices: number[] = [];
     for (let ri = 0; ri < rowsInSec - 1; ri++) {
-      const gi = r0 + ri;
-      const sMid = (sAt(gi) + sAt(gi + 1)) / 2;
       for (let j = 0; j < dCols - 1; j++) {
-        const dMid = (dAt(j) + dAt(j + 1)) / 2;
-        // Omit the near-track corridor under a tunnel hill (the bore trench).
-        if (boreCorridorAt(route, sMid, dMid)) continue;
         const v00 = ri * dCols + j;
         const v10 = (ri + 1) * dCols + j;
         const v01 = ri * dCols + (j + 1);

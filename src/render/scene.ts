@@ -589,7 +589,8 @@ function buildLineside(scene: THREE.Scene, route: Route): void {
   for (let i = 0; i < mastN; i++) {
     const s = (i + 1) * mastSpacing;
     const side = i % 2 === 0 ? 1 : -1;
-    const skip = viaductSpanAt(route, s);
+    // Skip OLE in the viaduct gap and through the tunnel bore (as fences/mileposts do).
+    const skip = viaductSpanAt(route, s) || boreCorridorAt(route, s, side * mastD);
     const heading = headingAt(route, s);
     e.set(0, heading, 0);
     q.setFromEuler(e);
