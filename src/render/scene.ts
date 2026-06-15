@@ -37,13 +37,22 @@ const ASPECT_COLOUR = {
   GREEN: 0x30ff60,
 } as const;
 
-// Rain box half-extents around the camera (m) and particle count.
+// Rain box half-extents around the camera (m).
 const RAIN_HALF_X = 18;
 const RAIN_HALF_Y = 16;
 const RAIN_HALF_Z = 40;
-const RAIN_COUNT = 2400;
 const RAIN_FALL = 22; // m/s downward
 const RAIN_SLANT = 0.35; // forward slant fraction of fall
+
+// Defaults preserving today's behaviour when no quality opts are supplied.
+const DEFAULT_RAIN_COUNT = 2400;
+const DEFAULT_PIXEL_RATIO_CAP = 2;
+
+/** Quality knobs from the pure `qualityFor` tier (HLD §2.7). */
+export interface SceneOptions {
+  rainCount?: number; // rain particles to allocate (default 2400; 0 builds empty)
+  pixelRatioCap?: number; // clamp on devicePixelRatio (default 2)
+}
 
 /**
  * Build the wet-night world + cab (HLD §2.3). The cab is created internally and
@@ -51,9 +60,12 @@ const RAIN_SLANT = 0.35; // forward slant fraction of fall
  * RenderView. Geometry/materials are created once; the per-frame loops
  * (rain/signals) allocate nothing.
  */
-export function createScene(parent: HTMLElement, route: Route): SceneHandle {
+export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptions): SceneHandle {
+  const rainCount = opts?.rainCount ?? DEFAULT_RAIN_COUNT;
+  const pixelRatioCap = opts?.pixelRatioCap ?? DEFAULT_PIXEL_RATIO_CAP;
+
   const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatioCap));
   renderer.setSize(parent.clientWidth, parent.clientHeight);
   parent.appendChild(renderer.domElement);
 
@@ -182,8 +194,8 @@ export function createScene(parent: HTMLElement, route: Route): SceneHandle {
   }
 
   // ── Rain (one THREE.Points, scrolled + wrapped, no per-frame allocation) ───
-  const rainPos = new Float32Array(RAIN_COUNT * 3);
-  for (let i = 0; i < RAIN_COUNT; i++) {
+  const rainPos = new Float32Array(rainCount * 3);
+  for (let i = 0; i < rainCount; i++) {
     rainPos[i * 3 + 0] = (Math.random() * 2 - 1) * RAIN_HALF_X;
     rainPos[i * 3 + 1] = Math.random() * 2 * RAIN_HALF_Y; // 0..2H, wrapped about camera.y
     rainPos[i * 3 + 2] = (Math.random() * 2 - 1) * RAIN_HALF_Z;
@@ -248,7 +260,7 @@ export function createScene(parent: HTMLElement, route: Route): SceneHandle {
     const slant = fall * RAIN_SLANT + Math.abs(view.speed) * dt * 0.25;
     const pos = rainGeo.getAttribute("position") as THREE.BufferAttribute;
     const arr = pos.array as Float32Array;
-    for (let i = 0; i < RAIN_COUNT; i++) {
+    for (let i = 0; i < rainCount; i++) {
       const yi = i * 3 + 1;
       const zi = i * 3 + 2;
       let y = arr[yi]! - fall; // fall relative to camera

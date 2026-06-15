@@ -13,26 +13,58 @@ import {
   resolveInputs,
   resolvedBrakeDemand,
   tickSafety,
-  type ControlIntent,
 } from "./sim/controls";
 import { createInitialAws, tickAws } from "./sim/aws";
 import { createInitialState, step } from "./sim/simulation";
 import { EMU_GTO_4CAR } from "./sim/train";
 import { WESTFORD_EASTBANK } from "./sim/route";
-import { DEFAULT_ENVIRONMENT, environmentParams, cycleEnvironment } from "./sim/environment";
+import {
+  DEFAULT_ENVIRONMENT,
+  environmentParams,
+  cycleEnvironment,
+  type EnvironmentParams,
+} from "./sim/environment";
 import { createScene, type RenderView } from "./render/scene";
 import { createHud } from "./ui/hud";
 import { createAudioEngine } from "./audio/engine";
 import { audioParams } from "./audio/params";
+import {
+  intentFromActions,
+  keyboardActions,
+  mergeActions,
+} from "./input/intent";
+import { createKeyboardSource } from "./input/keyboard";
+import { createGamepadSource } from "./input/gamepad";
+import { createTouchControls } from "./input/touch";
+import { motionParams } from "./ui/motion";
+import { qualityFor } from "./render/quality";
 
 const app = document.getElementById("app");
 if (!app) throw new Error("#app not found");
 
 const route = WESTFORD_EASTBANK;
 const spec = EMU_GTO_4CAR;
-const scene = createScene(app, route);
+
+// Read the accessibility / device hints once (HLD §2.8): reduced-motion gates
+// rain + wiper; coarse-pointer + DPR feed the performance tier.
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
+const quality = qualityFor({
+  coarsePointer,
+  maxDevicePixelRatio: window.devicePixelRatio,
+  reducedMotion,
+});
+
+const scene = createScene(app, route, quality);
 const hud = createHud(document.body);
 const audio = createAudioEngine();
+
+// Device-agnostic input producers (HLD §2.8): keyboard owns the edge set, gamepad
+// polls navigator each frame, touch overlays on coarse/narrow viewports. All three
+// produce the same abstract InputActions, merged by the pure `mergeActions`.
+const kb = createKeyboardSource();
+const pad = createGamepadSource();
+const touch = createTouchControls(app);
 
 let state = createInitialState(0);
 let controls = createInitialControls();
@@ -40,15 +72,6 @@ let safety = createInitialSafety();
 let aws = createInitialAws();
 let env = DEFAULT_ENVIRONMENT;
 
-// Per-frame edge set of just-pressed key codes (keydown ignores auto-repeat so a
-// hold never re-fires a detent; keyup/blur are housekeeping).
-const edges = new Set<string>();
-window.addEventListener("keydown", (e) => {
-  if (e.repeat) return;
-  edges.add(e.code);
-});
-window.addEventListener("keyup", (e) => edges.delete(e.code));
-window.addEventListener("blur", () => edges.clear());
 window.addEventListener("resize", () => scene.resize());
 
 // Autoplay policy: the AudioContext may only resume after a user gesture. Start
@@ -61,36 +84,30 @@ function startAudioOnce(): void {
 window.addEventListener("keydown", startAudioOnce);
 window.addEventListener("pointerdown", startAudioOnce);
 
-// Inline ~20-line decision-free keymap: edge set → ControlIntent (§2.3).
-function intentFromKeys(edgeSet: ReadonlySet<string>): ControlIntent {
-  const has = (code: string): boolean => edgeSet.has(code);
-  return {
-    powerUp: has("KeyW"),
-    powerDown: has("KeyS"),
-    brakeUp: has("KeyD"),
-    brakeDown: has("KeyA"),
-    emergency: has("Backquote"),
-    reverserFwd: has("KeyF"),
-    reverserOff: has("KeyN"),
-    reverserRev: has("KeyR"),
-    toggleDra: has("KeyL"),
-    acknowledge: has("KeyQ"),
-    vigilancePing: edgeSet.size > 0,
-  };
-}
-
 let last = performance.now();
 function frame(now: number): void {
   requestAnimationFrame(frame);
   const dt = Math.min((now - last) / 1000, 0.05); // the ONLY wall-clock
   last = now;
 
-  // Demo affordance: KeyE cycles the environment preset ring (NOT a ControlIntent
-  // — it drives no train control, so it's handled here via the pure cycle fn).
-  if (edges.has("KeyE")) env = cycleEnvironment(env);
-  const ep = environmentParams(env);
+  // Merge every device into one abstract action set, then map to the intent.
+  const actions = mergeActions(keyboardActions(kb.edges()), pad.actions(), touch.actions());
+  const intent = intentFromActions(actions);
 
-  const intent = intentFromKeys(edges);
+  // Demo affordance: cycleEnvironment steps the preset ring (NOT a ControlIntent
+  // — it drives no train control, so it's handled here via the pure cycle fn).
+  if (actions.cycleEnvironment) env = cycleEnvironment(env);
+
+  // Accessibility: reduced motion cuts rain and parks the wiper. Build a fresh
+  // EnvironmentParams (never mutate the pure result) with the gates applied.
+  const motion = motionParams(reducedMotion);
+  const base = environmentParams(env);
+  const ep: EnvironmentParams = {
+    ...base,
+    rainIntensity: base.rainIntensity * motion.rainScale,
+    wiperOn: base.wiperOn && motion.wiperEnabled,
+  };
+
   controls = reduceControls(controls, intent, state, safety); // safety = prior frame's
   const inputs = resolveInputs(controls, safety, ep.mu);
   const prevChainage = state.chainage; // pre-step
@@ -118,6 +135,6 @@ function frame(now: number): void {
   const brakeDemand = resolvedBrakeDemand(controls, safety);
   audio.update(audioParams(state.speed, controls.powerNotch / POWER_NOTCHES, brakeDemand));
 
-  edges.clear();
+  kb.clear();
 }
 requestAnimationFrame(frame);
