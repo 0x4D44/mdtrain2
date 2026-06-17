@@ -41,9 +41,9 @@ function clampRatio(n: number, lo: number, hi: number): number {
 }
 
 /**
- * Desktop (not coarse) ⇒ shadows/bloom on, ribbonHalfWidth 180, terrainSegLen 8,
+ * Desktop (not coarse) ⇒ shadows/bloom on, ribbonHalfWidth 120, terrainSegLen 8,
  * terrainSubdiv 24, attitudeScale 0.35, { pixelRatioCap: 2, rainCount: 2400 }.
- * Coarse-pointer ⇒ shadows/bloom off, ribbonHalfWidth 110, terrainSegLen 20,
+ * Coarse-pointer ⇒ shadows/bloom off, ribbonHalfWidth 90, terrainSegLen 20,
  * terrainSubdiv 10, attitudeScale 0, lower cap (≤ 1.5) and ~900 particles.
  * reducedMotion ⇒ rainCount 0 AND attitudeScale 0 (overrides those two only;
  * all other fields keep their base-tier values).
@@ -60,7 +60,7 @@ export function qualityFor(env: QualityEnv): QualitySettings {
         rainCount: MOBILE_RAIN,
         shadowsEnabled: false,
         bloomEnabled: false,
-        ribbonHalfWidth: 110,
+        ribbonHalfWidth: 90,
         terrainSegLen: 20,
         terrainSubdiv: 10,
         attitudeScale: 0,
@@ -70,7 +70,7 @@ export function qualityFor(env: QualityEnv): QualitySettings {
         rainCount: DESKTOP_RAIN,
         shadowsEnabled: true,
         bloomEnabled: true,
-        ribbonHalfWidth: 180,
+        ribbonHalfWidth: 120,
         terrainSegLen: 8,
         terrainSubdiv: 24,
         attitudeScale: 0.35,

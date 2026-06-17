@@ -258,8 +258,8 @@ describe("placeOnCentreline (O5c)", () => {
 describe("cant (O6)", () => {
   it("O6: below-clamp equals the signed formula; over-clamp equals ±CANT_MAX; sign follows κ", () => {
     const route = KINGSGATE_SEAHAVEN;
-    // Below-clamp: a gentle real curve on the route (R=800 Wealdham sweep).
-    const sCurve = 5_000; // inside [4500,7000) κ=+1/800
+    // Below-clamp: a gentle real curve on the route (Wealdham sweep, R=700).
+    const sCurve = 5_000; // inside [4800,5500) κ=+1/700
     const k = curvatureAt(route, sCurve);
     const v = speedLimitAt(route, sCurve);
     const expected = CANT_GAIN * Math.abs(k) * v * v * Math.sign(k);
@@ -267,8 +267,8 @@ describe("cant (O6)", () => {
     expect(Math.abs(expected)).toBeLessThan(CANT_MAX); // genuinely below the clamp
     expect(centerlineAt(route, sCurve).cant).toBeCloseTo(expected, 9);
 
-    // Straight ⇒ cant 0.
-    expect(centerlineAt(route, 1_000).cant).toBeCloseTo(0, 12);
+    // Straight ⇒ cant 0 (s=6000 is on the long [5500,9200) straight).
+    expect(centerlineAt(route, 6_000).cant).toBeCloseTo(0, 12);
 
     // Over-clamp (synthetic): big κ and v force the magnitude past CANT_MAX,
     // and the sign must follow κ.

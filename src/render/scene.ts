@@ -22,12 +22,12 @@ import type { Route, Station } from "../sim/route";
 import { aspectAt, gradeAt } from "../sim/route";
 import type { EnvironmentParams } from "../sim/environment";
 import { centerlineAt, placeOnCentreline, headingAt } from "../sim/centerline";
-import { formationHeight, anchorY, viaductSpanAt, boreCorridorAt } from "../sim/terrain";
+import { formationHeight, terrainHeight, anchorY, viaductSpanAt, boreCorridorAt } from "../sim/terrain";
 import { eyePose, cabAttitudeTarget, EYE_HEIGHT, EYE_D } from "../sim/camera";
 import { createCab, type CabView } from "./cab";
 import { buildScenery } from "./scenery";
 import { buildWorld, type WorldHandle } from "./terrain-mesh";
-import { makeEnvEquirect, disposeEnvEquirect } from "./textures";
+import { makeEnvEquirect, disposeEnvEquirect, makeRainDropTexture } from "./textures";
 import type { QualitySettings } from "./quality";
 
 const MPS_TO_MPH = 2.236936;
@@ -70,8 +70,12 @@ const RAIN_SLANT = 0.35; // forward slant fraction of fall
 // Standard gauge (m) — only for lineside-furniture lateral clearances.
 const GAUGE = 1.435;
 
-// Cab seating: driver on the LEFT (EYE_D = −0.5); furniture slid right so the
-// centre pillar is to the driver's right.
+// Cab seating: driver front-LEFT (UK). The camera yaws heading+π, so world +X
+// renders SCREEN-LEFT; with EYE_D = +0.5 (camera.ts) the eye sits at world +0.5,
+// i.e. on the left of the cab, and the track centre reads slightly right-of-centre.
+// CAB_SHIFT is in the cabMount-local frame and slides the furniture right so the
+// centre pillar sits to the driver's right; it stays +0.5 (it is NOT a lockstep
+// flip of EYE_D — FEAS-2).
 const CAB_SHIFT = 0.5;
 
 // Cab-attitude ease rate (per-second approach toward the target pitch/roll).
@@ -279,8 +283,12 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   }
   const rainGeo = new THREE.BufferGeometry();
   rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPos, 3));
+  // Round-drop alpha sprite (built ONCE): shapes each screen-aligned point so it
+  // reads as a round drop, not a square (#9). The tint stays on the material.
+  const rainDropTex = makeRainDropTexture();
   const rainMat = new THREE.PointsMaterial({
     color: 0x9fb6d8,
+    map: rainDropTex,
     size: 0.06,
     transparent: true,
     opacity: 0.5,
@@ -292,7 +300,8 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   scene.add(rain);
 
   // ── Cab: mounted on a train-fixed node (NOT the camera) so look-around turns
-  //    the head inside a fixed cab. Driver sits on the LEFT (EYE_D = −0.5). ────
+  //    the head inside a fixed cab. Driver sits front-LEFT (EYE_D = +0.5 in
+  //    camera.ts ⇒ eye at world +0.5 = screen-left under the heading+π camera). ─
   const cabMount = new THREE.Group();
   scene.add(cabMount);
   const cab = createCab(cabMount, CAB_SHIFT);
@@ -503,28 +512,45 @@ interface SignalHead {
 function buildSignals(scene: THREE.Scene, route: Route): SignalHead[] {
   const heads: SignalHead[] = [];
   const sideD = GAUGE / 2 + 2.2; // signal stands to the right (+d) of the track
-  const lampGeo = new THREE.CircleGeometry(0.16, 16);
+  // Larger lit-aspect disc so the head reads as a signal at range (#10).
+  const lampGeo = new THREE.CircleGeometry(0.22, 20);
   const glowTex = makeGlowTexture();
-  const postMat = new THREE.MeshStandardMaterial({ color: 0x0c0f14, roughness: 0.8, metalness: 0.3 });
-  const boardMat = new THREE.MeshStandardMaterial({ color: 0x07090c, roughness: 0.9 });
+  // Lighter grey post + a separate dark backboard so the head is legible (#10).
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x6c727a, roughness: 0.7, metalness: 0.4 });
+  const boardMat = new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 0.95 });
+  // Faint always-on housing ring round each lamp so the unlit head still reads.
+  const housingMat = new THREE.MeshStandardMaterial({
+    color: 0x14171c,
+    emissive: new THREE.Color(0x14171c),
+    emissiveIntensity: 0.25,
+    roughness: 0.8,
+  });
+  const housingGeo = new THREE.RingGeometry(0.22, 0.3, 20);
 
   for (const sig of route.signals) {
     const head = new THREE.Group();
     const place = placeOnCentreline(route, sig.chainage, sideD);
-    const formY = formationHeight(route, sig.chainage);
-    head.position.set(place.x, formY, place.z);
+    // Anchor on the GROUND (terrainHeight = near-track bed = formation − 0.4) so
+    // the post foot meets the ballast, not the rail top (#10-float / 3H).
+    const groundY = terrainHeight(route, sig.chainage, sideD);
+    head.position.set(place.x, groundY, place.z);
     // Face the approaching train: lamps point toward −Z-local, so rotate the
     // whole head by heading+π (D21 rear-facing convention).
     head.rotation.y = place.heading + Math.PI;
 
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 4.2, 10), postMat);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 4.2, 10), postMat);
     post.position.y = 2.1;
     head.add(post);
-    const board = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.5, 0.1), boardMat);
+    // A proper dark backboard behind the lamp column so the discs read against it.
+    const board = new THREE.Mesh(new THREE.BoxGeometry(0.62, 1.55, 0.1), boardMat);
     board.position.set(0, 4.0, 0);
     head.add(board);
 
     const mkLamp = (y: number, color: number): THREE.MeshStandardMaterial => {
+      // Faint always-on housing ring round the disc (legible even when unlit).
+      const housing = new THREE.Mesh(housingGeo, housingMat);
+      housing.position.set(0, y, 0.05);
+      head.add(housing);
       const mat = new THREE.MeshStandardMaterial({
         color: 0x05070a,
         emissive: new THREE.Color(color),
@@ -534,14 +560,14 @@ function buildSignals(scene: THREE.Scene, route: Route): SignalHead[] {
       const disc = new THREE.Mesh(lampGeo, mat);
       // After the head's heading+π yaw, +Z-local points back at the train; the
       // discs face +Z so the lit lamp is visible to the driver.
-      disc.position.set(0, y, 0.06);
+      disc.position.set(0, y, 0.07);
       head.add(disc);
       return mat;
     };
-    const red = mkLamp(4.55, ASPECT_COLOUR.RED);
+    const red = mkLamp(4.62, ASPECT_COLOUR.RED);
     const amberTop = mkLamp(4.2, ASPECT_COLOUR.YELLOW);
-    const amberBot = mkLamp(3.85, ASPECT_COLOUR.YELLOW);
-    const green = mkLamp(3.5, ASPECT_COLOUR.GREEN);
+    const amberBot = mkLamp(3.78, ASPECT_COLOUR.YELLOW);
+    const green = mkLamp(3.36, ASPECT_COLOUR.GREEN);
 
     const glow = new THREE.Sprite(
       new THREE.SpriteMaterial({
@@ -564,6 +590,50 @@ function buildSignals(scene: THREE.Scene, route: Route): SignalHead[] {
   return heads;
 }
 
+// ── OLE mast grid — ONE source of truth (HLD §3E) ────────────────────────────
+// The masts, the registration arm/dropper and the contact wire are all driven
+// off this single 45 m grid so the wire's staggered hang-points line up exactly
+// with each mast's registration. Mast i sits at chainage (i+1)·OLE_SPACING on the
+// alternating side (i even → +1, odd → −1); the contact wire is pulled OLE_STAGGER
+// to that side at the mast, so the wire zig-zags mast-to-mast (#6).
+const OLE_SPACING = 45; // mast pitch, m
+const OLE_STAGGER = 0.2; // contact-wire lateral pull-off at each mast, m
+const OLE_MAST_D = GAUGE / 2 + 2.6; // mast foot offset from the spine, m
+const OLE_WIRE_H = 5.9; // contact-wire height above the formation, m
+const OLE_POST_H = 7.0; // post height, m
+
+/** Number of masts on the route grid. */
+function oleMastCount(route: Route): number {
+  return Math.max(1, Math.floor(route.length / OLE_SPACING));
+}
+
+/** Mast `i` chainage and alternating side (i even → +1, odd → −1). */
+function oleMastS(i: number): number {
+  return (i + 1) * OLE_SPACING;
+}
+function oleMastSide(i: number): number {
+  return i % 2 === 0 ? 1 : -1;
+}
+
+/** True where mast `i` (and so its wire span) is skipped — viaduct gap / bore. */
+function oleSkip(route: Route, i: number): boolean {
+  const s = oleMastS(i);
+  return viaductSpanAt(route, s) || boreCorridorAt(route, s, oleMastSide(i) * OLE_MAST_D);
+}
+
+/**
+ * The staggered contact-wire world point at mast `i`: on the centreline pulled
+ * OLE_STAGGER to the mast's side, at OLE_WIRE_H above the formation. Writes into
+ * `out` (no allocation) and returns it.
+ */
+function oleWirePoint(route: Route, i: number, out: THREE.Vector3): THREE.Vector3 {
+  const s = oleMastS(i);
+  const stagger = oleMastSide(i) * OLE_STAGGER;
+  const c = placeOnCentreline(route, s, stagger);
+  out.set(c.x, formationHeight(route, s) + OLE_WIRE_H, c.z);
+  return out;
+}
+
 /**
  * OLE/catenary masts (~45 m, alternating sides), lineside fencing (both sides),
  * and mileposts (~500 m), each placed via placeOnCentreline at formationHeight so
@@ -579,39 +649,71 @@ function buildLineside(scene: THREE.Scene, route: Route): void {
   const v = new THREE.Vector3();
   const PARK = -1000; // unused instances parked below the world
 
-  // ── OLE masts: post + cantilever arm, alternating sides, every ~45 m ─────────
-  const mastSpacing = 45;
-  const mastN = Math.max(1, Math.floor(len / mastSpacing));
-  const mastD = GAUGE / 2 + 2.6;
-  const mastMat = new THREE.MeshStandardMaterial({ color: 0x10141a, roughness: 0.7, metalness: 0.5 });
-  const masts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.18, 6.5, 0.18), mastMat, mastN);
-  const arms = new THREE.InstancedMesh(new THREE.BoxGeometry(2.4, 0.12, 0.12), mastMat, mastN);
+  // ── OLE masts (one 45 m grid, HLD §3E): a richer structure than a bare box —
+  //    a tapered/segmented post + a cantilever tube reaching in over the track,
+  //    plus a registration arm/dropper (a THIRD InstancedMesh) connecting each
+  //    mast to its staggered contact-wire point so the wire visibly hangs off the
+  //    support (#7/#8). All InstancedMesh; NO per-mast Group (keeps the R3 budget). ─
+  const mastN = oleMastCount(route);
+  const mastMat = new THREE.MeshStandardMaterial({ color: 0x2a2f37, roughness: 0.7, metalness: 0.55 });
+  // Segmented/tapered post: a tall lower trunk + a slimmer upper section give the
+  // box a stepped, lattice-like read without leaving InstancedMesh.
+  const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.26, OLE_POST_H * 0.6, 0.26), mastMat, mastN);
+  const postTops = new THREE.InstancedMesh(new THREE.BoxGeometry(0.16, OLE_POST_H * 0.45, 0.16), mastMat, mastN);
+  // Cantilever tube reaching in over the track (long axis = local X).
+  const arms = new THREE.InstancedMesh(new THREE.BoxGeometry(2.4, 0.1, 0.1), mastMat, mastN);
+  // Registration arm/dropper: one slim box per mast, oriented to reach from the
+  // cantilever tip down/in to that mast's staggered wire point (the connection).
+  const dropMat = new THREE.MeshStandardMaterial({ color: 0x3a4049, roughness: 0.6, metalness: 0.6 });
+  const drops = new THREE.InstancedMesh(new THREE.BoxGeometry(0.05, 1, 0.05), dropMat, mastN);
+  const wirePt = new THREE.Vector3();
+  const dropDir = new THREE.Vector3();
+  const dropMid = new THREE.Vector3();
+  const Y_UP = new THREE.Vector3(0, 1, 0);
   for (let i = 0; i < mastN; i++) {
-    const s = (i + 1) * mastSpacing;
-    const side = i % 2 === 0 ? 1 : -1;
-    // Skip OLE in the viaduct gap and through the tunnel bore (as fences/mileposts do).
-    const skip = viaductSpanAt(route, s) || boreCorridorAt(route, s, side * mastD);
+    const s = oleMastS(i);
+    const side = oleMastSide(i);
     const heading = headingAt(route, s);
     e.set(0, heading, 0);
     q.setFromEuler(e);
     const formY = formationHeight(route, s);
-    if (skip) {
+    if (oleSkip(route, i)) {
       m.compose(v.set(0, PARK, 0), q, sc);
-      masts.setMatrixAt(i, m);
+      posts.setMatrixAt(i, m);
+      postTops.setMatrixAt(i, m);
       arms.setMatrixAt(i, m);
+      drops.setMatrixAt(i, m);
       continue;
     }
-    const cPost = placeOnCentreline(route, s, side * mastD);
-    m.compose(v.set(cPost.x, formY + 3.25, cPost.z), q, sc);
-    masts.setMatrixAt(i, m);
-    // Cantilever arm reaching in over the track at pantograph height.
-    const cArm = placeOnCentreline(route, s, side * (mastD - 1.2));
-    m.compose(v.set(cArm.x, formY + 6.0, cArm.z), q, sc);
+    // Lower trunk + upper section, stacked, on the mast side at formation level.
+    const cPost = placeOnCentreline(route, s, side * OLE_MAST_D);
+    m.compose(v.set(cPost.x, formY + OLE_POST_H * 0.3, cPost.z), q, sc);
+    posts.setMatrixAt(i, m);
+    m.compose(v.set(cPost.x, formY + OLE_POST_H * 0.6 + OLE_POST_H * 0.225, cPost.z), q, sc);
+    postTops.setMatrixAt(i, m);
+    // Cantilever tube reaching in over the track just above wire height.
+    const cArm = placeOnCentreline(route, s, side * (OLE_MAST_D - 1.2));
+    m.compose(v.set(cArm.x, formY + OLE_WIRE_H + 0.45, cArm.z), q, sc);
     arms.setMatrixAt(i, m);
+    // Registration/dropper: connect the cantilever tip (mast side, just above the
+    // wire) to the staggered wire point. Orient a unit-Y box along that vector.
+    oleWirePoint(route, i, wirePt);
+    const tipX = cArm.x;
+    const tipY = formY + OLE_WIRE_H + 0.45;
+    const tipZ = cArm.z;
+    dropDir.set(wirePt.x - tipX, wirePt.y - tipY, wirePt.z - tipZ);
+    const dropLen = Math.max(0.05, dropDir.length());
+    dropMid.set((tipX + wirePt.x) / 2, (tipY + wirePt.y) / 2, (tipZ + wirePt.z) / 2);
+    q.setFromUnitVectors(Y_UP, dropDir.normalize());
+    m.compose(dropMid, q, sc.set(1, dropLen, 1));
+    drops.setMatrixAt(i, m);
+    sc.set(1, 1, 1);
   }
-  masts.instanceMatrix.needsUpdate = true;
+  posts.instanceMatrix.needsUpdate = true;
+  postTops.instanceMatrix.needsUpdate = true;
   arms.instanceMatrix.needsUpdate = true;
-  scene.add(masts, arms);
+  drops.instanceMatrix.needsUpdate = true;
+  scene.add(posts, postTops, arms, drops);
 
   // ── Lineside fencing: instanced posts both sides every ~6 m ─────────────────
   const fenceSpacing = 6;
@@ -664,34 +766,42 @@ function buildLineside(scene: THREE.Scene, route: Route): void {
   scene.add(mileposts);
 }
 
-/** The contact wire: a thin box swept along the spine at pantograph height, one
- *  InstancedMesh segment per ~20 m, following the curve at formationHeight. */
+/**
+ * The contact wire (HLD §3E/#6): swept MAST-TO-MAST through the staggered hang
+ * points of the shared OLE grid, so each span runs from mast i's staggered wire
+ * point to mast i+1's — on alternating sides — and the wire visibly ZIGZAGS. One
+ * InstancedMesh (a thin box per span), oriented along each span vector. A span is
+ * parked if either of its end masts is skipped (viaduct gap / tunnel bore).
+ */
 function buildContactWire(scene: THREE.Scene, route: Route): void {
-  const len = route.length;
-  const SEG = 20;
-  const segN = Math.max(1, Math.ceil(len / SEG));
+  const mastN = oleMastCount(route);
+  const spanN = Math.max(1, mastN - 1);
   const wireMat = new THREE.MeshStandardMaterial({ color: 0x2a2e34, roughness: 0.5, metalness: 0.6 });
-  const wire = new THREE.InstancedMesh(new THREE.BoxGeometry(0.03, 0.03, SEG + 0.1), wireMat, segN);
+  // Unit-length box along local Y; per-span Y-scale stretches it to span length.
+  const wire = new THREE.InstancedMesh(new THREE.BoxGeometry(0.035, 1, 0.035), wireMat, spanN);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
-  const e = new THREE.Euler(0, 0, 0, "YXZ");
   const sc = new THREE.Vector3(1, 1, 1);
-  const v = new THREE.Vector3();
-  for (let i = 0; i < segN; i++) {
-    const sMid = Math.min(len, (i + 0.5) * SEG);
-    const heading = headingAt(route, sMid);
-    e.set(0, heading, 0);
-    q.setFromEuler(e);
-    // Carry the wire only where the masts are: skip it through the tunnel bore (the
-    // shell roofs the line) and over the viaduct gap (no masts there to hang it).
-    if (boreCorridorAt(route, sMid, 0) || viaductSpanAt(route, sMid)) {
-      m.compose(v.set(0, -1000, 0), q, sc);
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+  const mid = new THREE.Vector3();
+  const Y_UP = new THREE.Vector3(0, 1, 0);
+  const PARK = -1000;
+  for (let i = 0; i < spanN; i++) {
+    // Park the span if either end mast is omitted (no support to hang it from).
+    if (oleSkip(route, i) || oleSkip(route, i + 1)) {
+      m.compose(a.set(0, PARK, 0), q.identity(), sc.set(1, 1, 1));
       wire.setMatrixAt(i, m);
       continue;
     }
-    const c = placeOnCentreline(route, sMid, 0);
-    const formY = formationHeight(route, sMid);
-    m.compose(v.set(c.x, formY + 5.9, c.z), q, sc);
+    oleWirePoint(route, i, a);
+    oleWirePoint(route, i + 1, b);
+    dir.set(b.x - a.x, b.y - a.y, b.z - a.z);
+    const segLen = Math.max(0.05, dir.length());
+    mid.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+    q.setFromUnitVectors(Y_UP, dir.normalize());
+    m.compose(mid, q, sc.set(1, segLen, 1));
     wire.setMatrixAt(i, m);
   }
   wire.instanceMatrix.needsUpdate = true;
@@ -723,9 +833,15 @@ function buildStation(scene: THREE.Scene, route: Route, station: Station): void 
   const wallMat = new THREE.MeshStandardMaterial({ color: 0x2c333c, roughness: 0.85 });
   const steelMat = new THREE.MeshStandardMaterial({ color: 0x2a313b, roughness: 0.6, metalness: 0.4 });
 
-  // Platform slab (local +X = +d side; long axis along local Z = the track).
-  const slab = new THREE.Mesh(new THREE.BoxGeometry(platW, platH, len), concrete);
-  slab.position.set(centreD, platH / 2, 0);
+  // Platform slab (local +X = +d side; long axis along local Z = the track). The
+  // slab TOP stays at the platform surface (local platH = formation + platH); the
+  // BASE is dropped to the real ground at the platform centre so the slab meets the
+  // ballast rather than floating the uniform 0.4 m ballast-bed lip (#11 / 3H). The
+  // group origin is at formY, so the ground is at local (terrainHeight − formY).
+  const groundLocal = terrainHeight(route, z0, centreD) - formY; // ≈ −0.4 (bed lip)
+  const slabH = platH - groundLocal; // grows ~0.4 m DOWNWARD; the top is unchanged
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(platW, slabH, len), concrete);
+  slab.position.set(centreD, (platH + groundLocal) / 2, 0);
   slab.receiveShadow = true;
   group.add(slab);
 

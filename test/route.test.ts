@@ -5,6 +5,7 @@ import {
   WESTFORD_EASTBANK,
   STARTER_OFFSET,
   minCurveRadius,
+  speedLimitAt,
 } from "../src/sim/route";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -76,8 +77,8 @@ describe("minCurveRadius: tightest non-zero curve, +Infinity if all straight", (
     expect(minCurveRadius(WESTFORD_EASTBANK)).toBeCloseTo(250, 9);
   });
 
-  it("KINGSGATE_SEAHAVEN >= 400 (the grand route's curvature floor)", () => {
-    expect(minCurveRadius(KINGSGATE_SEAHAVEN)).toBeGreaterThanOrEqual(400);
+  it("KINGSGATE_SEAHAVEN >= 250 (the grand route's tightened curvature floor)", () => {
+    expect(minCurveRadius(KINGSGATE_SEAHAVEN)).toBeGreaterThanOrEqual(250);
   });
 
   it("an all-straight route ⇒ +Infinity (no non-zero curvature)", () => {
@@ -85,16 +86,55 @@ describe("minCurveRadius: tightest non-zero curve, +Infinity if all straight", (
   });
 });
 
-// ── O19: every grand-route curve is straight or R >= 400 ─────────────────────
+// ── O19 / curve-richness: bends often, every curve R >= 250, PSR off the cant cap ──
 
-describe("O19: every KINGSGATE_SEAHAVEN curvature is 0 or radius >= 400 m", () => {
-  it("no curve tighter than the 400 m floor (O-RIBBON @ desktop 180)", () => {
-    for (const seg of KINGSGATE_SEAHAVEN.curvatures) {
-      if (seg.value === 0) continue;
-      expect(1 / Math.abs(seg.value)).toBeGreaterThanOrEqual(400);
+describe("O19/curve-richness: KINGSGATE_SEAHAVEN bends often, every curve R >= 250 m", () => {
+  const curves = KINGSGATE_SEAHAVEN.curvatures.filter((s) => s.value !== 0);
+
+  it("every curve is straight or radius >= 250 m (O-RIBBON @ desktop 120)", () => {
+    for (const seg of curves) {
+      expect(1 / Math.abs(seg.value)).toBeGreaterThanOrEqual(250);
     }
-    // Non-vacuous: at least one genuine (non-zero) curve exists.
-    expect(KINGSGATE_SEAHAVEN.curvatures.some((s) => s.value !== 0)).toBe(true);
+    expect(curves.length).toBeGreaterThan(0); // non-vacuous
+  });
+
+  it(">= 5 non-zero curvature segments (no longer a ruler)", () => {
+    expect(curves.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it(">= 1 tight curve with R < 400 m", () => {
+    expect(curves.some((s) => 1 / Math.abs(s.value) < 400)).toBe(true);
+  });
+
+  it(">= 1 S-bend (adjacent curvature segments of opposite sign)", () => {
+    const segs = KINGSGATE_SEAHAVEN.curvatures;
+    let sBends = 0;
+    for (let i = 1; i < segs.length; i++) {
+      const a = segs[i - 1];
+      const b = segs[i];
+      if (a && b && a.value !== 0 && b.value !== 0 && Math.sign(a.value) !== Math.sign(b.value)) {
+        sBends++;
+      }
+    }
+    expect(sBends).toBeGreaterThanOrEqual(1);
+  });
+
+  it("AC-4b PSR: each curve's posted speed keeps cant off the ceiling (0.08·|κ|·v² <= 0.105)", () => {
+    const CANT_GAIN = 0.08;
+    const CANT_MAX = 0.105;
+    for (const seg of curves) {
+      // Sample the posted speed ACROSS the whole curve span and take the max —
+      // robust to a speed-limit boundary later shifting into the middle of a curve
+      // (a midpoint-only check could miss a faster sub-segment at the curve edge).
+      let vMax = 0;
+      const N = 8;
+      for (let j = 0; j <= N; j++) {
+        const s = Math.min(seg.from + (j / N) * (seg.to - seg.from), seg.to - 1e-6);
+        vMax = Math.max(vMax, speedLimitAt(KINGSGATE_SEAHAVEN, s)); // m/s
+      }
+      const cant = CANT_GAIN * Math.abs(seg.value) * vMax * vMax;
+      expect(cant).toBeLessThanOrEqual(CANT_MAX);
+    }
   });
 });
 

@@ -69,6 +69,32 @@ describe("O7 — anchorY", () => {
   });
 });
 
+describe("AC-11 — stations & signals sit on the ballast bed (no 0.4 m float)", () => {
+  // The platform edge (~0.7 m off the rail) out to the signal post (~2.9 m) all lie
+  // within SHOULDER (4 m), so terrainHeight is the near-track BED = formation − 0.4.
+  // The render anchors these structures to terrainHeight (not formationHeight), so
+  // they meet the bed; a base pinned to formationHeight would float 0.4 m. None of
+  // the station/signal chainages lie in a viaduct/tunnel band (m=0), so it is exact.
+  const STRUCTURE_OFFSETS = [0.7, 1.4, 2.2, 2.9];
+  it("terrainHeight at each station's near-track offset == formation − 0.4 (and < formation ⇒ a formation-anchored base floats)", () => {
+    for (const st of ROUTE.stations) {
+      const f = formationHeight(ROUTE, st.chainage);
+      for (const d of STRUCTURE_OFFSETS) {
+        expect(terrainHeight(ROUTE, st.chainage, d)).toBeCloseTo(f + BALLAST_DROP, 9);
+        expect(terrainHeight(ROUTE, st.chainage, d)).toBeLessThan(f);
+      }
+    }
+  });
+  it("terrainHeight at each signal's near-track offset == formation − 0.4", () => {
+    for (const sig of ROUTE.signals) {
+      const f = formationHeight(ROUTE, sig.chainage);
+      for (const d of STRUCTURE_OFFSETS) {
+        expect(terrainHeight(ROUTE, sig.chainage, d)).toBeCloseTo(f + BALLAST_DROP, 9);
+      }
+    }
+  });
+});
+
 describe("O8 — continuous two-surface ground", () => {
   it("m=0 (normal span) ⇒ |d|≤SHOULDER ⇒ terrainHeight == formation + BALLAST_DROP (incl. on curves)", () => {
     // sample s on normal spans (well outside both bands), including the Wealdham

@@ -90,21 +90,20 @@ describe("oracle O17: physics path never imports the spatial core", () => {
 describe("oracle O-RIBBON: ribbonHalfWidth ≤ 0.5·minCurveRadius (terrain routes)", () => {
   const desktop = qualityFor({ coarsePointer: false, maxDevicePixelRatio: 2, reducedMotion: false });
 
-  it("desktop ribbonHalfWidth (180) ≤ 0.5·minCurveRadius(KINGSGATE_SEAHAVEN)", () => {
-    expect(desktop.ribbonHalfWidth).toBe(180);
+  it("desktop ribbonHalfWidth (120) ≤ 0.5·minCurveRadius(KINGSGATE_SEAHAVEN)", () => {
+    expect(desktop.ribbonHalfWidth).toBe(120);
     const radius = minCurveRadius(KINGSGATE_SEAHAVEN);
     expect(desktop.ribbonHalfWidth).toBeLessThanOrEqual(0.5 * radius);
-    // The 400 m curvature floor the cap implies, made explicit.
-    expect(radius).toBeGreaterThanOrEqual(400);
+    // The 240 m curvature floor the cap implies (ribbon 120 ⇒ minRadius ≥ 240).
+    expect(radius).toBeGreaterThanOrEqual(240);
   });
 
-  it("WESTFORD_EASTBANK is EXEMPT and intentionally NOT asserted", () => {
-    // WESTFORD_EASTBANK is a physics/signalling fixture only — it is never
-    // terrain-rendered, keeps its 250 m curve, and is excluded from O-RIBBON by
-    // design (HLD D25). We document the exemption by asserting precisely the
-    // thing that makes it exempt: its tighter radius would VIOLATE the cap, so
-    // applying O-RIBBON to it would be wrong.
-    const radius = minCurveRadius(WESTFORD_EASTBANK);
-    expect(desktop.ribbonHalfWidth).toBeGreaterThan(0.5 * radius);
+  it("WESTFORD_EASTBANK is EXEMPT (a physics/signalling fixture, never terrain-rendered)", () => {
+    // WESTFORD_EASTBANK carries no terrain set-pieces (no viaducts/tunnels), so it
+    // is never terrain-rendered and O-RIBBON simply does not apply to it (HLD D25);
+    // it keeps its tight 250 m curve regardless of the ribbon width.
+    expect(WESTFORD_EASTBANK.viaducts).toBeUndefined();
+    expect(WESTFORD_EASTBANK.tunnels).toBeUndefined();
+    expect(minCurveRadius(WESTFORD_EASTBANK)).toBeCloseTo(250, 9);
   });
 });

@@ -30,7 +30,7 @@ describe("QUAL: qualityFor maps device → pixel-ratio cap + rain count", () => 
       rainCount: 2400,
       shadowsEnabled: true,
       bloomEnabled: true,
-      ribbonHalfWidth: 180,
+      ribbonHalfWidth: 120,
       terrainSegLen: 8,
       terrainSubdiv: 24,
       attitudeScale: 0.35,

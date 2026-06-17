@@ -12,8 +12,12 @@ import { clampEye } from "./terrain";
 // ── pinned constants (HLD §2.1b) ─────────────────────────────────────────────
 /** Driver's eye height above the formation, m. */
 export const EYE_HEIGHT = 1.9;
-/** Driver's lateral eye offset from the spine, m (negative = left of centre). */
-export const EYE_D = -0.5;
+/** Driver's lateral eye offset from the spine, m. UK driver-left: the render
+ *  camera yaws heading+π, so camera-local +X maps to world −X (screen-right =
+ *  world −X). Therefore world +X (EYE_D = +0.5) renders to the screen-LEFT — the
+ *  driver sits front-left and the track centre (d=0) reads slightly RIGHT of
+ *  centre. (camera.test.ts O5c pins this sign by a by-hand screen projection.) */
+export const EYE_D = 0.5;
 /** Maximum eased cab pitch (rad). */
 const PITCH_MAX = 0.052;
 /** Maximum eased cab roll (rad). */

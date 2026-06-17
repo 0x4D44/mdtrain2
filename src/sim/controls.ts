@@ -350,3 +350,16 @@ export function buildHudView(
     sunflower: aws.sunflower,
   };
 }
+
+/**
+ * The on-screen safety prompt (pure): a short, actionable instruction the HUD
+ * shows when the driver must act. Penalty takes precedence over the vigilance
+ * warning. The penalty text encodes the real release rule — a DSD penalty clears
+ * only on `acknowledge` AT A STAND (see `tickSafety`) — so the driver knows to
+ * stop first. Returns null when nothing is demanded.
+ */
+export function safetyPrompt(hud: HudView): string | null {
+  if (hud.penalty) return "PENALTY — STOP, THEN PRESS Q";
+  if (hud.dsdWarning) return "VIGILANCE — PRESS Q";
+  return null;
+}

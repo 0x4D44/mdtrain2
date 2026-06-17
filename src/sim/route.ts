@@ -116,12 +116,15 @@ export const WESTFORD_EASTBANK: Route = {
  * Brinemouth coast, through the Stonehead Tunnel, to a seaside terminus.
  *
  * HARD invariants (O19/O19b/O-RIBBON):
- *  - every non-zero curvature ⇒ radius ≥ 400 m (here R=800 Wealdham, R=500
- *    Brinemouth ⇒ minCurveRadius = 500 ≥ 400, so 0.5·min ≥ 180 = desktop ribbon).
- *  - the viaduct band [7500,8600] and tunnel band [11000,12400] lie WHOLLY on
- *    κ=0 curvature segments (straight piers / straight bore axis).
+ *  - every non-zero curvature ⇒ radius ≥ 250 m. The line bends often: 7 curves
+ *    incl. two S-bends and tight (R=300/350) bends, tightest R=300 ⇒
+ *    minCurveRadius = 300, so 0.5·min = 150 ≥ desktop ribbon 120.
+ *  - the viaduct band [7730,8370] (8050±320) and tunnel band [11320,12080]
+ *    (11700±380) lie WHOLLY on κ=0 curvature segments (straight piers / bore axis).
+ *  - PSR: every curve's posted speed keeps the cant off the ceiling —
+ *    CANT_GAIN(0.08)·|κ|·speedLimit² ≤ CANT_MAX(0.105) per curve.
  *  - grades gentle (|grade| ≤ 0.02); grades/speedLimits/curvatures cover
- *    [0,14000] contiguously ascending.
+ *    [0,14000] contiguously ascending; stations & signals sit on straights.
  *  - signals are station starters (post = board + STARTER_OFFSET=120), ascending;
  *    no starter at the Kingsgate origin or the Seahaven terminus.
  */
@@ -144,27 +147,38 @@ export const KINGSGATE_SEAHAVEN: Route = {
     { from: 11_000, to: 12_400, value: 0.0 }, // Ch6 tunnel, level
     { from: 12_400, to: 14_000, value: -0.006 }, // Ch7 low embankment to the buffers
   ],
+  // PSR profile — curve speeds keep cant off the ceiling (0.08·|κ|·v² ≤ 0.105).
   speedLimits: [
-    { from: 0, to: 600, value: 25 * MPH }, // out of Kingsgate platforms
-    { from: 600, to: 1_700, value: 60 * MPH }, // Ch1 cutting
-    { from: 1_700, to: 2_300, value: 30 * MPH }, // Ashcombe approach/platform
-    { from: 2_300, to: 4_400, value: 70 * MPH }, // Ch2 suburb run
-    { from: 4_400, to: 4_700, value: 50 * MPH }, // into the Wealdham curve
-    { from: 4_700, to: 7_000, value: 55 * MPH }, // Ch3 country / sweeping curve
-    { from: 7_000, to: 9_200, value: 75 * MPH }, // viaduct & approaches
-    { from: 9_200, to: 9_500, value: 40 * MPH }, // Brinemouth shore curve
-    { from: 9_500, to: 10_100, value: 30 * MPH }, // Brinemouth platform
-    { from: 10_100, to: 10_900, value: 50 * MPH }, // toward Stonehead
-    { from: 10_900, to: 12_500, value: 60 * MPH }, // through the tunnel
-    { from: 12_500, to: 13_400, value: 45 * MPH }, // Ch7 coastal run-in
-    { from: 13_400, to: 14_000, value: 15 * MPH }, // into the buffer stops
+    { from: 0, to: 700, value: 25 * MPH }, // out of Kingsgate platforms
+    { from: 700, to: 1_300, value: 40 * MPH }, // R=300 city-exit curve
+    { from: 1_300, to: 1_800, value: 55 * MPH }, // straight, accelerating
+    { from: 1_800, to: 2_200, value: 25 * MPH }, // Ashcombe platform (2000)
+    { from: 2_200, to: 2_600, value: 45 * MPH }, // departing
+    { from: 2_600, to: 4_000, value: 50 * MPH }, // suburb S-bend (R=500)
+    { from: 4_000, to: 5_500, value: 60 * MPH }, // straight + Wealdham sweep (R=700)
+    { from: 5_500, to: 5_900, value: 30 * MPH }, // Wealdham platform (5800)
+    { from: 5_900, to: 9_200, value: 60 * MPH }, // country + Wyre viaduct (straight)
+    { from: 9_200, to: 9_700, value: 55 * MPH }, // Brinemouth approach (R=600)
+    { from: 9_700, to: 9_900, value: 30 * MPH }, // Brinemouth platform (9800)
+    { from: 9_900, to: 11_000, value: 45 * MPH }, // Brinemouth shore S-bend (R=350)
+    { from: 11_000, to: 13_600, value: 55 * MPH }, // Stonehead tunnel + coastal run (straight)
+    { from: 13_600, to: 14_000, value: 20 * MPH }, // into the Seahaven buffers
   ],
+  // 7 curves incl. two S-bends; tightest R=300. Bands sit on the κ=0 straights.
   curvatures: [
-    { from: 0, to: 4_500, value: 0 }, // Ch1-2 city + suburb, straight
-    { from: 4_500, to: 7_000, value: 1 / 800 }, // Ch3 Wealdham sweep, R=800
-    { from: 7_000, to: 9_200, value: 0 }, // straight: carries the viaduct band 7500-8600
-    { from: 9_200, to: 10_800, value: 1 / 500 }, // Ch5 Brinemouth shore, R=500
-    { from: 10_800, to: 14_000, value: 0 }, // straight: carries the tunnel band 11000-12400
+    { from: 0, to: 700, value: 0 }, // leave Kingsgate straight
+    { from: 700, to: 1_300, value: 1 / 300 }, // Ch1 curve out of the city, R=300 (tight)
+    { from: 1_300, to: 2_600, value: 0 }, // straight through Ashcombe (2000)
+    { from: 2_600, to: 3_300, value: 1 / 500 }, // Ch2 suburb S-bend, +R=500 …
+    { from: 3_300, to: 4_000, value: -1 / 500 }, // … −R=500 (an S-bend)
+    { from: 4_000, to: 4_800, value: 0 }, // straight
+    { from: 4_800, to: 5_500, value: 1 / 700 }, // Ch3 Wealdham sweep, R=700
+    { from: 5_500, to: 9_200, value: 0 }, // straight: Wealdham (5800) + viaduct band 7730-8370
+    { from: 9_200, to: 9_700, value: 1 / 600 }, // Ch5 Brinemouth approach, R=600
+    { from: 9_700, to: 10_300, value: 0 }, // straight through Brinemouth (9800)
+    { from: 10_300, to: 10_650, value: -1 / 350 }, // Ch5 shore S-bend, −R=350 (tight) …
+    { from: 10_650, to: 11_000, value: 1 / 350 }, // … +R=350 (an S-bend)
+    { from: 11_000, to: 14_000, value: 0 }, // straight: tunnel band 11320-12080 + Seahaven
   ],
   // Station starters only (no block signals, no terminus starter). Posts sit just
   // past each platform: post = station board + STARTER_OFFSET(=120). Kingsgate

@@ -15,7 +15,7 @@ const ROWS: readonly Row[] = [
   { keys: "W / S", what: "Power up / down" },
   { keys: "D / A", what: "Brake on / off" },
   { keys: "F / N / R", what: "Reverser fwd / neutral / rev" },
-  { keys: "Q", what: "Acknowledge AWS / reset penalty" },
+  { keys: "Q", what: "Acknowledge AWS / reset penalty (at a stand)" },
   { keys: "L", what: "DRA (driver's reminder)" },
   { keys: "`", what: "Emergency brake" },
   { keys: "E", what: "Change weather / time of day" },

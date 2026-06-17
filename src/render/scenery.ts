@@ -61,11 +61,14 @@ function placeBox(mesh: THREE.InstancedMesh, i: number, x: number, y: number, z:
  */
 export function buildScenery(scene: THREE.Scene, route: Route, gauge: number): void {
   buildTrees(scene, route, gauge);
-  // A couple of road overbridges at sensible places on the route (an Ashcombe-area
-  // brick bridge and a concrete one further into the suburb run). Chainages chosen
-  // on straight, normal spans — clear of the viaduct valley and the tunnel hill.
+  buildBushes(scene, route, gauge); // low foliage / hedgerows between the trees
+  buildBuildings(scene, route, gauge); // city cluster ~Kingsgate, suburb ~Ashcombe
+  // Road overbridges at sensible places on the route, clear of the viaduct valley
+  // and the tunnel hill (each builder skips bad chainages internally).
+  buildOverbridge(scene, route, gauge, 1200, 0x5a5e66); // concrete bridge in the Kingsgate cutting
   buildOverbridge(scene, route, gauge, 3000, 0x6b5747); // brick road overbridge (Ashcombe)
   buildOverbridge(scene, route, gauge, 4000, 0x53585f); // a concrete one further on
+  buildOverbridge(scene, route, gauge, 6600, 0x6b5747); // brick bridge in the country run
   buildPlatformPeople(scene, route, gauge);
 }
 
@@ -79,7 +82,7 @@ export function buildScenery(scene: THREE.Scene, route: Route, gauge: number): v
 function buildTrees(scene: THREE.Scene, route: Route, gauge: number): void {
   const len = route.length;
   const rnd = makeRng(8675309);
-  const N = 360;
+  const N = 720; // denser woodland (was 360) — #5
   const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3a28, roughness: 1 });
   const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.26, 1, 6), trunkMat, N);
   const foliageMat = new THREE.MeshStandardMaterial({ color: 0x33602f, roughness: 1, flatShading: true });
@@ -124,6 +127,103 @@ function buildTrees(scene: THREE.Scene, route: Route, gauge: number): void {
   foliage.frustumCulled = false;
   scene.add(trunks);
   scene.add(foliage);
+}
+
+/**
+ * Low foliage — bushes and rough hedgerows — filling the gap between the bare
+ * ground and the tree canopy (#5). One squashed-icosahedron InstancedMesh, placed
+ * in clumps like the trees but lower, denser and closer in to the line. Each sits
+ * ON the terrain via `anchorY`, skipping the open viaduct valley and the bore.
+ * Density falls off with |d| (the rnd()*rnd() lateral bias). Built ONCE.
+ */
+function buildBushes(scene: THREE.Scene, route: Route, gauge: number): void {
+  const len = route.length;
+  const rnd = makeRng(1234567);
+  const N = 520;
+  const bushMat = new THREE.MeshStandardMaterial({ color: 0x2c5128, roughness: 1, flatShading: true });
+  const bushes = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), bushMat, N);
+  const minD = gauge / 2 + 6; // a little closer in than the trees
+  let placed = 0;
+  let guard = 0;
+  while (placed < N && guard < N * 4) {
+    guard++;
+    const cs = rnd() * len;
+    const side = rnd() < 0.5 ? -1 : 1;
+    // Closer to the line than the trees (smaller spread) → reads as hedgerows.
+    const cd = side * (minD + rnd() * rnd() * 90);
+    const clump = 4 + Math.floor(rnd() * 6);
+    for (let c = 0; c < clump && placed < N; c++) {
+      const s = cs + (rnd() - 0.5) * 24;
+      const d = cd + (rnd() - 0.5) * 10; // tight lateral spread → a rough hedge line
+      if (Math.abs(d) < minD || s < 0 || s > len) continue;
+      if (viaductSpanAt(route, s) || boreCorridorAt(route, s, d)) continue;
+      const place = placeOnCentreline(route, s, d);
+      const baseY = anchorY(route, s, d, 0);
+      const rx = 0.7 + rnd() * 0.9; // bush half-width, m
+      const ry = 0.5 + rnd() * 0.5; // bush half-height, m (low)
+      TMP_M.compose(TMP_P.set(place.x, baseY + ry * 0.8, place.z), NOROT, TMP_S.set(rx, ry, rx));
+      bushes.setMatrixAt(placed, TMP_M);
+      placed++;
+    }
+  }
+  for (let i = placed; i < N; i++) placeBox(bushes, i, 0, -1000, 0, 1, 1, 1);
+  bushes.instanceMatrix.needsUpdate = true;
+  bushes.frustumCulled = false;
+  scene.add(bushes);
+}
+
+/**
+ * Lineside buildings (#5): a dense city cluster near the Kingsgate terminus
+ * (chainage 0–1800, the level cutting span) and lower suburban blocks around
+ * Ashcombe (~2000). One box InstancedMesh, per-instance scaled to a building size
+ * and tinted (instanceColor). Each block sits ON the terrain via `anchorY` and is
+ * set BACK from the line (beyond the fence), skipping the viaduct valley and bore.
+ * Density and height fall off with |d| and away from the urban centres. Built ONCE.
+ */
+function buildBuildings(scene: THREE.Scene, route: Route, gauge: number): void {
+  const len = route.length;
+  const rnd = makeRng(20260617);
+  const N = 240;
+  const mat = new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true });
+  const blocks = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, N);
+  const tints = [0x3a3d44, 0x46413b, 0x3d4248, 0x4a4540, 0x363a40, 0x504a42];
+  const minD = gauge / 2 + 12; // well back from the line, beyond the fence
+  const col = new THREE.Color();
+  // Two urban zones: (centre chainage, half-length, max height, lateral reach).
+  const zones = [
+    { c: 700, half: 1100, maxH: 26, reach: 150 }, // Kingsgate city (0–1800)
+    { c: 2000, half: 700, maxH: 12, reach: 110 }, // Ashcombe suburb (~2000)
+  ];
+  let placed = 0;
+  let guard = 0;
+  while (placed < N && guard < N * 6) {
+    guard++;
+    const zone = zones[Math.floor(rnd() * zones.length)];
+    if (!zone) continue;
+    const s = zone.c + (rnd() - 0.5) * 2 * zone.half;
+    if (s < 0 || s > len) continue;
+    const side = rnd() < 0.5 ? -1 : 1;
+    // rnd()*rnd() biases blocks close in (denser by the line, sparser far out).
+    const d = side * (minD + rnd() * rnd() * zone.reach);
+    if (viaductSpanAt(route, s) || boreCorridorAt(route, s, d)) continue;
+    const place = placeOnCentreline(route, s, d);
+    const baseY = anchorY(route, s, d, 0);
+    // Taller close in, shorter far out; jittered. Footprint scales loosely with it.
+    const near = 1 - Math.min(1, Math.abs(d) / (minD + zone.reach));
+    const h = 4 + near * zone.maxH * (0.4 + rnd() * 0.6);
+    const w = 5 + rnd() * 9;
+    const dpt = 5 + rnd() * 9;
+    TMP_M.compose(TMP_P.set(place.x, baseY + h / 2, place.z), NOROT, TMP_S.set(w, h, dpt));
+    blocks.setMatrixAt(placed, TMP_M);
+    const tint = tints[Math.floor(rnd() * tints.length)] ?? 0x3a3d44;
+    blocks.setColorAt(placed, col.setHex(tint));
+    placed++;
+  }
+  for (let i = placed; i < N; i++) placeBox(blocks, i, 0, -1000, 0, 1, 1, 1);
+  blocks.instanceMatrix.needsUpdate = true;
+  if (blocks.instanceColor) blocks.instanceColor.needsUpdate = true;
+  blocks.frustumCulled = false;
+  scene.add(blocks);
 }
 
 /**

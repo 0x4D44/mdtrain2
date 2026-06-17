@@ -11,9 +11,11 @@ import {
   notchFraction,
   reduceControls,
   resolveInputs,
+  safetyPrompt,
   tickSafety,
   type ControlIntent,
   type ControlState,
+  type HudView,
   type SafetyState,
 } from "../src/sim/controls";
 import { createInitialAws, tickAws } from "../src/sim/aws";
@@ -606,5 +608,25 @@ describe("oracle O14: buildHudView projection", () => {
     const c = controls({ lastDir: -1 });
     const v = buildHudView(createInitialState(0), c, createInitialSafety(), WESTFORD_EASTBANK, new Set(), BLACK_HUD);
     expect(v.nextStop).toBe("— (end of line)");
+  });
+});
+
+// ── safetyPrompt — the actionable on-screen instruction (AC-3) ───────────────
+describe("safetyPrompt — on-screen safety instruction", () => {
+  const base: HudView = buildHudView(
+    createInitialState(0), controls({}), createInitialSafety(), WESTFORD_EASTBANK, new Set(), BLACK_HUD,
+  );
+
+  it("penalty ⇒ STOP-then-Q instruction (encodes the at-a-stand release)", () => {
+    expect(safetyPrompt({ ...base, penalty: true })).toBe("PENALTY — STOP, THEN PRESS Q");
+  });
+  it("vigilance warning only ⇒ PRESS-Q instruction", () => {
+    expect(safetyPrompt({ ...base, dsdWarning: true, penalty: false })).toBe("VIGILANCE — PRESS Q");
+  });
+  it("penalty takes precedence over the warning", () => {
+    expect(safetyPrompt({ ...base, penalty: true, dsdWarning: true })).toBe("PENALTY — STOP, THEN PRESS Q");
+  });
+  it("neither ⇒ null (no prompt)", () => {
+    expect(safetyPrompt({ ...base, penalty: false, dsdWarning: false })).toBe(null);
   });
 });

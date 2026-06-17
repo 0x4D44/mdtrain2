@@ -74,6 +74,50 @@ export function createCab(parent: THREE.Object3D, shiftX = 0): CabHandle {
   const deskMat = new THREE.MeshStandardMaterial({ color: 0x1b2028, roughness: 0.6, metalness: 0.25 });
   const trimMat = new THREE.MeshStandardMaterial({ color: 0x0c0f14, roughness: 0.8, metalness: 0.2 });
 
+  // ── Enclosing cab shell (HLD §3B / #2) ──────────────────────────────────────
+  // Dark boxes around the eye so the world no longer shows at the window-frame
+  // edges. Forward face is LEFT OPEN (the windscreen aperture); built ONCE,
+  // parented to the same `root` as the windscreen surround, so it slides with
+  // CAB_SHIFT and turns with look-around. Reuses the dark `trimMat`.
+  // Shell extents (root-local; the eye is at the origin, looking down −Z):
+  const SH_HALF_X = 1.02; // side walls just outside the windscreen frame (halfW 0.95)
+  const SH_TOP = 0.82; // roof height above the eye
+  const SH_BOT = -1.25; // floor depth below the eye
+  const SH_FRONT = -0.95; // windscreen plane (aperture front edge; frameZ −0.9)
+  const SH_BACK = 0.85; // rear wall behind the driver
+  const SH_T = 0.05; // wall thickness
+  const SH_DEPTH = SH_BACK - SH_FRONT; // front-to-back run of the side walls/roof/floor
+  const SH_MIDZ = (SH_FRONT + SH_BACK) / 2; // centre between aperture and rear wall
+  const SH_MIDY = (SH_TOP + SH_BOT) / 2; // centre between roof and floor
+  const SH_HEIGHT = SH_TOP - SH_BOT; // floor-to-roof run of the side walls
+
+  const mkShell = (w: number, h: number, d: number, x: number, y: number, z: number): void => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), trimMat);
+    m.position.set(x, y, z);
+    root.add(m);
+  };
+  // Left / right side walls (run front→back, floor→roof).
+  mkShell(SH_T, SH_HEIGHT, SH_DEPTH, -SH_HALF_X, SH_MIDY, SH_MIDZ);
+  mkShell(SH_T, SH_HEIGHT, SH_DEPTH, SH_HALF_X, SH_MIDY, SH_MIDZ);
+  // Roof / floor (span side-to-side, front→back).
+  mkShell(2 * SH_HALF_X + SH_T, SH_T, SH_DEPTH, 0, SH_TOP, SH_MIDZ);
+  mkShell(2 * SH_HALF_X + SH_T, SH_T, SH_DEPTH, 0, SH_BOT, SH_MIDZ);
+  // Rear wall (span side-to-side, floor→roof) behind the driver.
+  mkShell(2 * SH_HALF_X + SH_T, SH_HEIGHT, SH_T, 0, SH_MIDY, SH_BACK);
+  // A-pillars: stout vertical posts framing the open windscreen, sealing the
+  // gap between the windscreen surround (halfW 0.95) and the side walls.
+  const PILLAR_W = SH_HALF_X - 0.95 + SH_T; // close the side gap at the aperture
+  const PILLAR_X = 0.95 + PILLAR_W / 2 - SH_T / 2;
+  mkShell(PILLAR_W, SH_HEIGHT, SH_T, -PILLAR_X, SH_MIDY, SH_FRONT);
+  mkShell(PILLAR_W, SH_HEIGHT, SH_T, PILLAR_X, SH_MIDY, SH_FRONT);
+  // Cant rail / header above the screen and a kick panel below: seal the gap
+  // between the windscreen surround (halfH 0.62) and the roof/floor at the
+  // open front face, so no world shows above or below the screen.
+  const HEADER_H = SH_TOP - 0.62; // roof down to top of screen aperture
+  mkShell(2 * 0.95, HEADER_H, SH_T, 0, 0.62 + HEADER_H / 2, SH_FRONT);
+  const KICK_H = -0.62 - SH_BOT; // bottom of screen aperture down to floor
+  mkShell(2 * 0.95, KICK_H, SH_T, 0, -0.62 - KICK_H / 2, SH_FRONT);
+
   // ── Windscreen surround (a frame around the forward view) ──────────────────
   // Four thin bars forming a rectangle ahead of the eye.
   const frameZ = -0.9;

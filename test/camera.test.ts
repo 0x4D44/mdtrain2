@@ -81,11 +81,23 @@ describe("O5d — heading semantics & the +π yaw convention (PURE, no GPU)", ()
   });
 });
 
-describe("O5c-sign (camera) — eyeD sign is preserved laterally on a straight", () => {
-  it("EYE_D = −0.5 ⇒ eyePose.x = −0.5 on a straight (driver on the left)", () => {
+describe("O5c-sign (camera) — driver sits front-left (UK); track centre reads right-of-centre", () => {
+  it("EYE_D = +0.5 ⇒ eyePose.x = +0.5 on a straight (world +X)", () => {
     const eye = eyePose(STRAIGHT, 200, EYE_D, EYE_HEIGHT);
+    expect(EYE_D).toBe(0.5); // pin the sign: UK driver-left (a flip back to −0.5 fails here)
     expect(eye.x).toBeCloseTo(EYE_D, 9); // right = (cos0,−sin0)=(1,0) ⇒ x = 0 + d·1
     expect(eye.z).toBeCloseTo(200, 9);
+  });
+
+  it("under the render camera yaw (heading+π) the track centre is to the driver's RIGHT ⇒ driver-left", () => {
+    const eye = eyePose(STRAIGHT, 200, EYE_D, EYE_HEIGHT);
+    // camera-local +X is screen-right; yaw it by heading+π to get the world right vector.
+    const right = applyYaw(eye.heading + Math.PI, { x: 1, y: 0, z: 0 });
+    // vector from the eye to the track centre (x=0) in world:
+    const toCentre = { x: 0 - eye.x, y: 0, z: 0 };
+    const dot = toCentre.x * right.x + toCentre.y * right.y + toCentre.z * right.z;
+    // centre on the camera's RIGHT ⇒ vanishing point right-of-centre ⇒ driver sits left.
+    expect(dot).toBeGreaterThan(0);
   });
 });
 

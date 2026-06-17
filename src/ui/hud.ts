@@ -4,6 +4,7 @@
 // happened in the pure `buildHudView` (controls.ts); this is the impure adapter.
 
 import type { HudView } from "../sim/controls";
+import { safetyPrompt } from "../sim/controls";
 
 export function createHud(parent: HTMLElement): { update(v: HudView): void } {
   const root = document.createElement("div");
@@ -60,6 +61,18 @@ export function createHud(parent: HTMLElement): { update(v: HudView): void } {
 
   parent.appendChild(root);
 
+  // Prominent centre prompt: shows the pure `safetyPrompt(view)` string when the
+  // driver must act (penalty / vigilance), hidden otherwise. One element, driven
+  // from the same per-frame `update` below — no new state.
+  const prompt = document.createElement("div");
+  prompt.id = "mdtrain2-safety-prompt";
+  prompt.style.cssText =
+    "position:fixed;left:50%;top:34%;transform:translate(-50%,-50%);" +
+    "font:700 30px/1.2 ui-monospace,monospace;letter-spacing:0.04em;" +
+    "padding:14px 26px;border-radius:8px;text-align:center;white-space:nowrap;" +
+    "text-shadow:0 2px 4px #000;pointer-events:none;display:none";
+  parent.appendChild(prompt);
+
   function setLamp(el: HTMLSpanElement, on: boolean, color: string): void {
     if (on) {
       el.style.background = color;
@@ -88,6 +101,20 @@ export function createHud(parent: HTMLElement): { update(v: HudView): void } {
     setLamp(dsd, v.dsdWarning, "#e0b020"); // amber — DSD warning
     setLamp(penalty, v.penalty, "#e04030"); // red — penalty
     setLamp(sunflower, v.sunflower === "CAUTION", "#e0b020"); // amber — AWS caution latched
+
+    // Centre safety prompt: red+urgent for a penalty, amber for the vigilance
+    // warning. `v.penalty` (over dsdWarning) drives the colour to match the
+    // selector's precedence.
+    const msg = safetyPrompt(v);
+    if (msg === null) {
+      prompt.style.display = "none";
+    } else {
+      prompt.textContent = msg;
+      prompt.style.display = "block";
+      prompt.style.background = v.penalty ? "rgba(160,16,16,0.92)" : "rgba(150,110,0,0.92)";
+      prompt.style.color = v.penalty ? "#ffe6e0" : "#fff4d0";
+      prompt.style.border = v.penalty ? "2px solid #ff6048" : "2px solid #ffc838";
+    }
   }
 
   return { update };
