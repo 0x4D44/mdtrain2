@@ -2,10 +2,12 @@
 //
 // O17 (layering): an import-boundary guard proving the 1-D physics path never
 // reaches the 3-D spatial core. The longitudinal dynamics + signalling modules
-// (physics/simulation/controls/aws/train) must NOT import centerline/terrain/
-// camera — those belong to the curvilinear spatial layer the render adapters
-// consume. We assert this structurally by parsing each module's import
-// specifiers from raw source, so a future careless `import` is caught here.
+// (physics/simulation/controls/aws/train + the track-graph 1-D logic graph/
+// graph-sim) must NOT import centerline/terrain/camera — nor graph-geom, the
+// sanctioned spatial consumer that imports centerline (a transitive leak).
+// Those belong to the curvilinear spatial layer the render adapters consume. We
+// assert this structurally by parsing each module's import specifiers from raw
+// source, so a future careless `import` is caught here.
 //
 // O-RIBBON: the ground ribbon must never fold over itself on a curve, so the
 // half-width is capped at half the tightest curve radius. Pinned for the
@@ -39,6 +41,8 @@ describe("oracle O17: physics path never imports the spatial core", () => {
       "../src/sim/controls.ts",
       "../src/sim/aws.ts",
       "../src/sim/train.ts",
+      "../src/sim/graph.ts",
+      "../src/sim/graph-sim.ts",
     ],
     { query: "?raw", import: "default", eager: true },
   );
@@ -56,19 +60,31 @@ describe("oracle O17: physics path never imports the spatial core", () => {
   };
 
   // A spatial-core import is any specifier whose basename is one of these.
-  const SPATIAL_CORE = ["centerline", "terrain", "camera"];
+  // `graph-geom` is the sanctioned spatial consumer (it imports centerline), so a
+  // fenced longitudinal module importing it would be a transitive leak to the
+  // spatial core — denied here too, while graph-geom.ts itself stays out of the
+  // fenced set above.
+  const SPATIAL_CORE = ["centerline", "terrain", "camera", "graph-geom"];
   const reachesSpatialCore = (spec: string): boolean =>
     SPATIAL_CORE.some((name) => spec === `./${name}` || spec.endsWith(`/${name}`));
 
-  it("globbed all five physics-path modules (non-vacuous)", () => {
+  it("globbed all seven physics-path modules (non-vacuous)", () => {
     const paths = Object.keys(physicsPathSources);
-    expect(paths.length).toBe(5);
-    for (const tail of ["physics.ts", "simulation.ts", "controls.ts", "aws.ts", "train.ts"]) {
+    expect(paths.length).toBe(7);
+    for (const tail of [
+      "physics.ts",
+      "simulation.ts",
+      "controls.ts",
+      "aws.ts",
+      "train.ts",
+      "graph.ts",
+      "graph-sim.ts",
+    ]) {
       expect(paths.some((p) => p.endsWith(tail)), `missing ${tail}`).toBe(true);
     }
   });
 
-  it("no physics-path module imports centerline / terrain / camera", () => {
+  it("no physics-path module imports centerline / terrain / camera / graph-geom", () => {
     for (const [path, src] of Object.entries(physicsPathSources)) {
       const specs = importSpecifiers(src);
       const offenders = specs.filter(reachesSpatialCore);
