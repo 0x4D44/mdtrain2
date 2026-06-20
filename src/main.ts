@@ -1,9 +1,16 @@
 // The thin, deliberately-untested impure shell. Wires keyboard → controls →
-// safety → resolveInputs → step → render → HUD. Contains NO control/safety/HUD
-// arithmetic — every branch that could be wrong lives in a pure, tested function
-// under src/sim. `mu` is derived each frame from the pure `environmentParams(env)`:
-// the default (rainy day) pins μ=0.25, and the wet-night preset (night×rain) pins
-// μ=ADHESION.wetNight (0.20) by calibration — ENV4.
+// safety → resolveInputs → the track-graph tick → render → HUD. Contains NO
+// control/safety/HUD/sim arithmetic — every branch that could be wrong lives in a
+// pure, tested function under src/sim. `mu` is derived each frame from the pure
+// `environmentParams(env)`.
+//
+// Track graph (HLD 2026.06.20): the live scenario is the KINGSGATE JUNCTION — the
+// real KINGSGATE_SEAHAVEN route decomposed into graph edges with a passing loop +
+// a branch + reactive AI. The PLAYER's path edges reconstruct KINGSGATE exactly
+// (P0/P1/G-DIFF), so the player's edge-local position maps to a global KINGSGATE
+// chainage and the entire existing camera/scenery/AWS/HUD pipeline runs unchanged
+// on KINGSGATE with that chainage. The AIs run on the graph (loop/branch) and are
+// rendered as world meshes via placeOnEdge.
 
 import {
   buildHudView,
@@ -16,8 +23,7 @@ import {
   tickSafety,
 } from "./sim/controls";
 import { createInitialAws, tickAws } from "./sim/aws";
-import { createInitialState, step } from "./sim/simulation";
-import { EMU_GTO_4CAR } from "./sim/train";
+import { type SimState } from "./sim/simulation";
 import { KINGSGATE_SEAHAVEN } from "./sim/route";
 import {
   DEFAULT_ENVIRONMENT,
@@ -25,7 +31,11 @@ import {
   cycleEnvironment,
   type EnvironmentParams,
 } from "./sim/environment";
-import { createScene, type RenderView } from "./render/scene";
+import { type Edge, type Path, type TrainPosition } from "./sim/graph";
+import { placeOnEdge, validateGraph } from "./sim/graph-geom";
+import { tickAll, type TrainRecord } from "./sim/graph-sim";
+import { KINGSGATE_JUNCTION } from "./sim/testbed";
+import { createScene, type RenderView, type TrainMeshHandle } from "./render/scene";
 import { createHud } from "./ui/hud";
 import { createHelpPanel } from "./ui/help";
 import { createAudioEngine } from "./audio/engine";
@@ -44,11 +54,47 @@ import { qualityFor } from "./render/quality";
 const app = document.getElementById("app");
 if (!app) throw new Error("#app not found");
 
-const route = KINGSGATE_SEAHAVEN;
-const spec = EMU_GTO_4CAR;
+// The live scenario: the KINGSGATE junction (real route + loop + branch + AI).
+const scenario = KINGSGATE_JUNCTION;
+const graph = scenario.graph;
+const route = KINGSGATE_SEAHAVEN; // the player's underlay route (scenery, AWS, HUD, camera)
 
-// Read the accessibility / device hints once (HLD §2.8): reduced-motion gates
-// rain + wiper; coarse-pointer + DPR feed the performance tier.
+// Fail fast at startup if the authored graph is structurally invalid.
+const defects = validateGraph(
+  graph,
+  Object.values(scenario.paths),
+  scenario.stationNames,
+  scenario.maxSpeed,
+  120,
+);
+if (defects.length) {
+  throw new Error(`Track graph invalid:\n${defects.map((d) => `  ${d.kind}: ${d.detail}`).join("\n")}`);
+}
+
+// The player's path edges concatenate into KINGSGATE; build the edge→global
+// chainage offset table so the player's edge-local position maps to a KINGSGATE
+// chainage (and back, for the ?s= screenshot seed).
+const playerPath = scenario.paths.player as Path;
+const offsets: Record<string, number> = {};
+{
+  let acc = 0;
+  for (const id of playerPath) {
+    offsets[id] = acc;
+    acc += (graph.edges[id] as Edge).route.length;
+  }
+}
+const posToGlobal = (pos: TrainPosition): number => (offsets[pos.edgeId] ?? 0) + pos.s;
+const globalToPos = (gs: number): TrainPosition => {
+  for (const id of playerPath) {
+    const len = (graph.edges[id] as Edge).route.length;
+    const off = offsets[id] as number;
+    if (gs < off + len || id === playerPath[playerPath.length - 1]) {
+      return { edgeId: id, s: Math.max(0, Math.min(len, gs - off)), d: 0 };
+    }
+  }
+  return { edgeId: playerPath[0] as string, s: 0, d: 0 };
+};
+
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
 const quality = qualityFor({
@@ -59,25 +105,29 @@ const quality = qualityFor({
 
 const scene = createScene(app, route, quality);
 const hud = createHud(document.body);
-createHelpPanel(document.body); // top-right controls card; toggles with H
+createHelpPanel(document.body);
 const audio = createAudioEngine();
 
-// Device-agnostic input producers (HLD §2.8): keyboard owns the edge set, gamepad
-// polls navigator each frame, touch overlays on coarse/narrow viewports. All three
-// produce the same abstract InputActions, merged by the pure `mergeActions`.
 const kb = createKeyboardSource();
 const pad = createGamepadSource();
 const touch = createTouchControls(app);
 
-// Screenshot/testing affordance: ?s=<chainage> seeds the start position so the
-// 14 km route's set-pieces (Wyre Viaduct ~8050, Stonehead Tunnel ~11700) can be
-// captured without driving there. Absent/invalid ⇒ 0, so default behaviour is
-// unchanged.
+// The trains: the scenario's initial records. ?s=<chainage> reseeds the player's
+// start so the route's set-pieces (Wyre Viaduct ~8050, Stonehead Tunnel ~11700)
+// can be captured without driving there.
+let records: TrainRecord[] = scenario.makeRecords();
 const startParam = Number(new URLSearchParams(location.search).get("s") ?? "");
-const startChainage = Number.isFinite(startParam)
-  ? Math.max(0, Math.min(route.length, startParam))
-  : 0;
-let state = createInitialState(startChainage);
+if (Number.isFinite(startParam) && startParam > 0) {
+  const seed = globalToPos(Math.max(0, Math.min(route.length, startParam)));
+  records = records.map((r) =>
+    r.id === "player" ? { ...r, pos: seed, state: { ...r.state, chainage: seed.s } } : r,
+  );
+}
+
+// One world mesh per AI train.
+const aiMeshes = new Map<string, TrainMeshHandle>();
+for (const r of records) if (r.kind === "ai") aiMeshes.set(r.id, scene.addTrainMesh());
+
 let controls = createInitialControls();
 let safety = createInitialSafety();
 let aws = createInitialAws();
@@ -85,8 +135,6 @@ let env = DEFAULT_ENVIRONMENT;
 
 window.addEventListener("resize", () => scene.resize());
 
-// Autoplay policy: the AudioContext may only resume after a user gesture. Start
-// it on the first keydown/pointerdown, then drop the listeners.
 function startAudioOnce(): void {
   audio.start();
   window.removeEventListener("keydown", startAudioOnce);
@@ -95,22 +143,18 @@ function startAudioOnce(): void {
 window.addEventListener("keydown", startAudioOnce);
 window.addEventListener("pointerdown", startAudioOnce);
 
+const player = (): TrainRecord => records.find((r) => r.id === "player") as TrainRecord;
+
 let last = performance.now();
 function frame(now: number): void {
   requestAnimationFrame(frame);
   const dt = Math.min((now - last) / 1000, 0.05); // the ONLY wall-clock
   last = now;
 
-  // Merge every device into one abstract action set, then map to the intent.
   const actions = mergeActions(keyboardActions(kb.edges()), pad.actions(), touch.actions());
   const intent = intentFromActions(actions);
-
-  // Demo affordance: cycleEnvironment steps the preset ring (NOT a ControlIntent
-  // — it drives no train control, so it's handled here via the pure cycle fn).
   if (actions.cycleEnvironment) env = cycleEnvironment(env);
 
-  // Accessibility: reduced motion cuts rain and parks the wiper. Build a fresh
-  // EnvironmentParams (never mutate the pure result) with the gates applied.
   const motion = motionParams(reducedMotion);
   const base = environmentParams(env);
   const ep: EnvironmentParams = {
@@ -119,18 +163,39 @@ function frame(now: number): void {
     wiperOn: base.wiperOn && motion.wiperEnabled,
   };
 
-  controls = reduceControls(controls, intent, state, safety); // safety = prior frame's
-  const inputs = resolveInputs(controls, safety, ep.mu);
-  const prevChainage = state.chainage; // pre-step
-  state = step(spec, route, state, inputs, dt); // advance FIRST (crossing detection needs prev→now)
-  const dir = controls.lastDir; // same authority resolveInputs uses
-  const awsOut = tickAws(aws, state, route, intent, prevChainage, dir, dt); // post-step chainage
+  // The player's pre-tick state in GLOBAL (KINGSGATE) chainage.
+  const pRec = player();
+  const prevGlobal = posToGlobal(pRec.pos);
+  const preState: SimState = {
+    chainage: prevGlobal,
+    speed: pRec.state.speed,
+    brakeActual: pRec.state.brakeActual,
+    time: pRec.state.time,
+  };
+
+  controls = reduceControls(controls, intent, preState, safety); // safety = prior frame's
+  const playerInputs = resolveInputs(controls, safety, ep.mu);
+
+  // Advance every train on the graph (player by playerInputs, AIs by their controller).
+  records = tickAll(graph, records, scenario.blockEdgeIds, dt, ep.mu, playerInputs);
+
+  // The player's post-tick state, back in global chainage, drives the existing pipeline.
+  const pNow = player();
+  const nowGlobal = posToGlobal(pNow.pos);
+  const postState: SimState = {
+    chainage: nowGlobal,
+    speed: pNow.state.speed,
+    brakeActual: pNow.state.brakeActual,
+    time: pNow.state.time,
+  };
+  const dir = controls.lastDir;
+  const awsOut = tickAws(aws, postState, route, intent, prevGlobal, dir, dt);
   aws = awsOut.next;
-  safety = tickSafety(safety, intent, state, dt, { reasons: awsOut.reasons });
+  safety = tickSafety(safety, intent, postState, dt, { reasons: awsOut.reasons });
 
   const view: RenderView = {
-    chainage: state.chainage,
-    speed: state.speed,
+    chainage: nowGlobal,
+    speed: postState.speed,
     dt,
     controls,
     safety,
@@ -139,12 +204,20 @@ function frame(now: number): void {
     env: ep,
   };
   scene.render(view);
-  hud.update(buildHudView(state, controls, safety, route, aws.served, awsOut.hud));
+  hud.update(buildHudView(postState, controls, safety, route, aws.served, awsOut.hud));
 
-  // Audio: whine under power, rolling with speed, hiss with the resolved brake
-  // demand (lever ∨ penalty full-service) — same authority the physics uses.
+  // Position the AI-train meshes via placeOnEdge (world coords == KINGSGATE centreline).
+  for (const r of records) {
+    if (r.kind !== "ai") continue;
+    const mesh = aiMeshes.get(r.id);
+    if (!mesh) continue;
+    const edge = graph.edges[r.pos.edgeId] as Edge;
+    mesh.setPose(placeOnEdge(edge, r.pos.s, r.pos.d));
+    mesh.setVisible(true);
+  }
+
   const brakeDemand = resolvedBrakeDemand(controls, safety);
-  audio.update(audioParams(state.speed, controls.powerNotch / POWER_NOTCHES, brakeDemand));
+  audio.update(audioParams(postState.speed, controls.powerNotch / POWER_NOTCHES, brakeDemand));
 
   kb.clear();
 }

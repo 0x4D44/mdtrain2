@@ -45,11 +45,22 @@ export interface RenderView {
   env: EnvironmentParams;
 }
 
+/** A movable AI-train mesh placed in world coordinates (track-graph §3.8). */
+export interface TrainMeshHandle {
+  /** Position the train front at a world pose (heading = track tangent, rad). */
+  setPose(p: { x: number; y: number; z: number; heading: number }): void;
+  setVisible(visible: boolean): void;
+}
+
 export interface SceneHandle {
   /** Project sim state into the cab view and render the world under the
    *  current environment. */
   render(view: RenderView): void;
   resize(): void;
+  /** Add a dynamic AI-train mesh (positioned each frame via `placeOnEdge`). The
+   *  scene's world coordinates are the route centreline's, so a track-graph edge
+   *  pose drops straight in. */
+  addTrainMesh(): TrainMeshHandle;
 }
 
 // Aspect → lamp emissive colour. DOUBLE_YELLOW lights both amber lamps.
@@ -489,7 +500,51 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
     if (composer) composer.setSize(w, h);
   }
 
-  return { render, resize };
+  // ── AI-train meshes (track-graph §3.8): a simple 4-car EMU proxy placed in
+  //    world coords. The body's local +Z is "forward"; a rotation of `heading`
+  //    about Y aligns it with the track tangent (sin ψ, cos ψ). ───────────────
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2b3a55, roughness: 0.5, metalness: 0.2 });
+  const stripeMat = new THREE.MeshStandardMaterial({
+    color: 0x101820,
+    emissive: 0x223044,
+    emissiveIntensity: 0.6,
+    roughness: 0.3,
+  });
+  const CAR_LEN = 19, CAR_GAP = 1.2, CAR_W = 2.7, CAR_H = 3.6, RAIL_TO_FLOOR = 0.2;
+  function makeEmuBody(): THREE.Group {
+    const g = new THREE.Group();
+    for (let i = 0; i < 4; i++) {
+      const car = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.BoxGeometry(CAR_W, CAR_H, CAR_LEN), bodyMat);
+      body.castShadow = true;
+      car.add(body);
+      // window band just below mid-height
+      const band = new THREE.Mesh(new THREE.BoxGeometry(CAR_W + 0.02, 0.7, CAR_LEN - 2), stripeMat);
+      band.position.y = 0.5;
+      car.add(band);
+      // cars extend BEHIND the front reference point (origin) along −Z.
+      car.position.set(0, RAIL_TO_FLOOR + CAR_H / 2, -(CAR_LEN / 2) - i * (CAR_LEN + CAR_GAP));
+      g.add(car);
+    }
+    g.visible = false; // shown once first positioned
+    return g;
+  }
+
+  function addTrainMesh(): TrainMeshHandle {
+    const g = makeEmuBody();
+    scene.add(g);
+    return {
+      setPose(p) {
+        g.position.set(p.x, p.y, p.z);
+        g.rotation.set(0, p.heading, 0);
+      },
+      setVisible(v) {
+        g.visible = v;
+      },
+    };
+  }
+
+  return { render, resize, addTrainMesh };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

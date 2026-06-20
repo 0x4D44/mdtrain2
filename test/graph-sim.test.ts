@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { Aspect, Route } from "../src/sim/route";
 import { aspectAt, nextSignalAhead } from "../src/sim/route";
-import type { SimInputs, SimState } from "../src/sim/simulation";
+import { step, createInitialState, type SimInputs, type SimState } from "../src/sim/simulation";
+import { KINGSGATE_SEAHAVEN } from "../src/sim/route";
 import { EMU_GTO_4CAR } from "../src/sim/train";
 import { IDENTITY_FRAME, type Edge, type TrackGraph } from "../src/sim/graph";
 import { exitFrame, validateGraph } from "../src/sim/graph-geom";
@@ -244,5 +245,43 @@ describe("S2 — branch divergence (synthetic testbed)", () => {
     expect(Math.abs(branchPsi - mainPsi)).toBeGreaterThan(0.2);
     // validateGraph passes for the branch path alone
     expect(validateGraph(scn.graph, [scn.paths.ai2 as string[]], scn.stationNames, scn.maxSpeed)).toEqual([]);
+  });
+});
+
+// ── live-wiring faithfulness: the KINGSGATE-junction player == KINGSGATE direct ─
+
+describe("KINGSGATE-junction player reproduces driving KINGSGATE_SEAHAVEN directly", () => {
+  it("global chainage and speed match step()-on-KINGSGATE across both joins (the cuts are constant-grade, κ=0)", () => {
+    const scn = KINGSGATE_JUNCTION;
+    const path = scn.paths.player as string[];
+    const offsets: Record<string, number> = {};
+    let acc = 0;
+    for (const id of path) {
+      offsets[id] = acc;
+      acc += (scn.graph.edges[id] as Edge).route.length;
+    }
+
+    // graph player: a single record on the player path, from the route start.
+    let rec: TrainRecord = {
+      id: "player",
+      path,
+      pos: { edgeId: path[0] as string, s: 0, d: 0 },
+      state: createInitialState(0),
+      spec: EMU_GTO_4CAR,
+      kind: "player",
+    };
+    // KINGSGATE direct.
+    let mono: SimState = createInitialState(0);
+    const drive: SimInputs = { notch: 1, brake: 0, dir: 1, mu: MU, emergency: false };
+
+    for (let n = 0; n < 6_000; n++) {
+      [rec] = tickAll(scn.graph, [rec], scn.blockEdgeIds, 0.05, MU, drive);
+      mono = step(EMU_GTO_4CAR, KINGSGATE_SEAHAVEN, mono, drive, 0.05);
+      const globalS = (offsets[rec.pos.edgeId] as number) + rec.pos.s;
+      expect(globalS).toBeCloseTo(mono.chainage, 6);
+      expect(rec.state.speed).toBeCloseTo(mono.speed, 6);
+    }
+    // it really crossed both junction joins onto the onward edge
+    expect(rec.pos.edgeId).toBe("K_onward");
   });
 });
