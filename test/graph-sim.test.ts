@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import type { Route } from "../src/sim/route";
-import { aspectAt } from "../src/sim/route";
+import type { Aspect, Route } from "../src/sim/route";
+import { aspectAt, nextSignalAhead } from "../src/sim/route";
 import type { SimInputs, SimState } from "../src/sim/simulation";
 import { EMU_GTO_4CAR } from "../src/sim/train";
 import { IDENTITY_FRAME, type Edge, type TrackGraph } from "../src/sim/graph";
-import { exitFrame } from "../src/sim/graph-geom";
+import { exitFrame, validateGraph } from "../src/sim/graph-geom";
 import {
   occupiedEdges,
   aspectSource,
@@ -16,6 +16,11 @@ import {
   AI_BRAKE_MARGIN,
   type TrainRecord,
 } from "../src/sim/graph-sim";
+import {
+  SYNTHETIC_TESTBED,
+  KINGSGATE_JUNCTION,
+  type Scenario,
+} from "../src/sim/testbed";
 
 const edge = (id: string, route: Route, frame = IDENTITY_FRAME): Edge => ({ id, route, frame });
 
@@ -159,5 +164,85 @@ describe("MT1 — tickAll is permutation-invariant", () => {
     };
     expect(key(rev, "player")).toEqual(key(fwd, "player"));
     expect(key(rev, "ai")).toEqual(key(fwd, "ai"));
+  });
+});
+
+// ── the headline scenarios (S1/S2) + validateGraph on both graphs ─────────────
+
+const FULL_POWER: SimInputs = { notch: 1, brake: 0, dir: 1, mu: MU, emergency: false };
+const find = (rs: TrainRecord[], id: string): TrainRecord => rs.find((r) => r.id === id) as TrainRecord;
+
+/** The aspect the looped AI's loop-exit starter shows this frame (recomputed from
+ *  the pre-move snapshot, exactly as tickAll's AI sees it). null if not applicable. */
+function loopExitAspect(scn: Scenario, recs: TrainRecord[], loopEdgeId: string): Aspect | null {
+  const ai = find(recs, "ai1");
+  if (ai.pos.edgeId !== loopEdgeId) return null;
+  const occ = occupiedEdges(recs.map((r) => ({ id: r.id, pos: r.pos })));
+  const occByOthers = new Set([...occ].filter((e) => e !== loopEdgeId));
+  const route = (scn.graph.edges[loopEdgeId] as Edge).route;
+  const n = nextSignalAhead(route, ai.state.chainage, 1);
+  if (!n) return null;
+  return aspectAt(route, n.i, aspectSource(new Set(), scn.blockEdgeIds, occByOthers));
+}
+
+describe("validateGraph accepts both scenario graphs", () => {
+  it("the synthetic testbed is invariant-clean (incl. the merge: both parents share E_main_out)", () => {
+    const s = SYNTHETIC_TESTBED;
+    expect(validateGraph(s.graph, Object.values(s.paths), s.stationNames, s.maxSpeed)).toEqual([]);
+  });
+
+  it("the KINGSGATE junction is invariant-clean (decomposed real route + loop + branch)", () => {
+    const s = KINGSGATE_JUNCTION;
+    expect(validateGraph(s.graph, Object.values(s.paths), s.stationNames, s.maxSpeed, 120)).toEqual([]);
+  });
+});
+
+describe("S1 — the player delays AND overtakes a looped AI (synthetic testbed)", () => {
+  it("the looped AI is held RED in the loop while the player occupies the onward block, then resumes", () => {
+    const scn = SYNTHETIC_TESTBED;
+    let recs = scn.makeRecords();
+    let heldFired = false; // non-vacuity: the delay genuinely happened
+    let resumedAfterHold = false;
+
+    for (let n = 0; n < 9_000; n++) {
+      const aspect = loopExitAspect(scn, recs, "E_loop");
+      const ai = find(recs, "ai1");
+      const player = find(recs, "player");
+      // NON-VACUITY: ∃ a tick with loop-exit RED ∧ AI ~stopped ∧ player ON the block.
+      if (aspect === "RED" && Math.abs(ai.state.speed) < 0.3 && player.pos.edgeId === "E_main_out") {
+        heldFired = true;
+      }
+      // RELEASE: the AI is moving again on the onward block after the hold.
+      if (heldFired && ai.pos.edgeId === "E_main_out" && ai.state.speed > 1) {
+        resumedAfterHold = true;
+      }
+      recs = tickAll(scn.graph, recs, scn.blockEdgeIds, 0.05, MU, FULL_POWER);
+    }
+
+    expect(heldFired).toBe(true); // the player provably delayed the AI
+    expect(resumedAfterHold).toBe(true); // and the AI resumed once the block cleared
+    expect(find(recs, "player").pos.edgeId).toBe("E_main_buffer"); // player completed (overtook)
+    const ai1 = find(recs, "ai1");
+    expect(ai1.pos.edgeId).toBe("E_main_buffer"); // AI completed its booked path
+    expect(Math.abs(ai1.state.speed)).toBeLessThan(0.5);
+  });
+});
+
+describe("S2 — branch divergence (synthetic testbed)", () => {
+  it("the branch AI diverges at the throat and runs to its buffer", () => {
+    const scn = SYNTHETIC_TESTBED;
+    let recs = scn.makeRecords();
+    for (let n = 0; n < 9_000; n++) {
+      recs = tickAll(scn.graph, recs, scn.blockEdgeIds, 0.05, MU, FULL_POWER);
+    }
+    const ai2 = find(recs, "ai2");
+    expect(ai2.pos.edgeId).toBe("E_branch_buffer");
+    expect(Math.abs(ai2.state.speed)).toBeLessThan(0.5);
+    // the branch visibly departs the main: its entry heading differs from the through's
+    const branchPsi = exitFrame(scn.graph.edges["E_branch"] as Edge).psi0;
+    const mainPsi = exitFrame(scn.graph.edges["E_main_through"] as Edge).psi0;
+    expect(Math.abs(branchPsi - mainPsi)).toBeGreaterThan(0.2);
+    // validateGraph passes for the branch path alone
+    expect(validateGraph(scn.graph, [scn.paths.ai2 as string[]], scn.stationNames, scn.maxSpeed)).toEqual([]);
   });
 });
