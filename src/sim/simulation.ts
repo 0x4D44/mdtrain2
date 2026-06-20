@@ -34,7 +34,10 @@ export function createInitialState(chainage = 0): SimState {
   return { chainage, speed: 0, brakeActual: 1, time: 0 };
 }
 
-const MAX_DT = 0.05; // clamp long frames
+/** Longest frame the integrator will advance in one call, s (long frames are
+ *  clamped). Exported so the track graph's P-LEN one-join-per-tick guard shares
+ *  the exact same bound (`validateGraph`). */
+export const MAX_DT = 0.05;
 const SUBSTEP = 1 / 240; // fixed-timestep integration for stability/determinism
 
 /**

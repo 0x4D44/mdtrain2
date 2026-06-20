@@ -18,6 +18,7 @@ import {
   AWS_MAGNET_OFFSET,
 } from "./route";
 import { planarPoseAt, heightAt } from "./centerline";
+import { MAX_DT } from "./simulation";
 import type { Edge, EdgeFrame, TrackGraph, Path } from "./graph";
 
 // Mirrors of the pinned constants (DR-1: cant/radius checks live only as inline
@@ -25,7 +26,6 @@ import type { Edge, EdgeFrame, TrackGraph, Path } from "./graph";
 const CANT_GAIN = 0.08;
 const CANT_MAX = 0.105;
 const RADIUS_MIN = 250;
-const MAX_DT = 0.05; // mirrors simulation.ts (not exported there)
 const P_LEN_SAFETY = 4; // edge length must exceed maxSpeed·MAX_DT by this margin
 
 // ── frame-aware geometry (post-transform of the unchanged local pose) ─────────

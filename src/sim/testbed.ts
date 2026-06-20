@@ -167,10 +167,11 @@ function buildSyntheticTestbed(): Scenario {
     blockEdgeIds: ["E_main_out"],
     stationNames: new Set(),
     maxSpeed: 44.7,
+    // The synthetic edges carry no station starters, so served = ∅ for all.
     makeRecords: () => [
-      mkRecord("player", paths.player as Path, "E_main_in", 700, 12, 0, "player"),
-      mkRecord("ai1", paths.ai1 as Path, "E_main_in", 80, 12, 6, "ai"),
-      mkRecord("ai2", paths.ai2 as Path, "E_main_in", 40, 12, -6, "ai"),
+      mkRecord("player", paths.player as Path, "E_main_in", 700, 12, 0, "player", new Set()),
+      mkRecord("ai1", paths.ai1 as Path, "E_main_in", 80, 12, 6, "ai", new Set()),
+      mkRecord("ai2", paths.ai2 as Path, "E_main_in", 40, 12, -6, "ai", new Set()),
     ],
   };
 }
@@ -220,12 +221,24 @@ function buildKingsgateJunction(): Scenario {
     maxSpeed: 44.7,
     // Player slightly ahead so it reaches the junction first; AIs follow. The human
     // drives the player, so this is a starting tableau, not a scripted overtake.
+    // Each AI serves the stations on its booked path, so the real KINGSGATE station
+    // starters clear for it and only the loop-exit block token holds it (C1).
     makeRecords: () => [
-      mkRecord("player", paths.player as Path, "K_approach", 220, 10, 0, "player"),
-      mkRecord("ai1", paths.ai1 as Path, "K_approach", 120, 10, 6, "ai"),
-      mkRecord("ai2", paths.ai2 as Path, "K_approach", 60, 10, -6, "ai"),
+      mkRecord("player", paths.player as Path, "K_approach", 220, 10, 0, "player", new Set()),
+      mkRecord("ai1", paths.ai1 as Path, "K_approach", 120, 10, 6, "ai", stationsOnPath(graph, paths.ai1 as Path)),
+      mkRecord("ai2", paths.ai2 as Path, "K_approach", 60, 10, -6, "ai", stationsOnPath(graph, paths.ai2 as Path)),
     ],
   };
+}
+
+/** The station names along a path's edges — the stops an AI on that path is
+ *  assumed to make, so their starters clear for it (D-IMPL-2 / review C1). */
+function stationsOnPath(graph: TrackGraph, path: Path): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const id of path) {
+    for (const st of (graph.edges[id] as Edge).route.stations) out.add(st.name);
+  }
+  return out;
 }
 
 function mkRecord(
@@ -236,6 +249,7 @@ function mkRecord(
   speed: number,
   d: number,
   kind: "player" | "ai",
+  served: ReadonlySet<string>,
 ): TrainRecord {
   return {
     id,
@@ -244,14 +258,9 @@ function mkRecord(
     state: { chainage: s, speed, brakeActual: 0, time: 0 },
     spec: EMU_GTO_4CAR,
     kind,
+    served,
   };
 }
 
 export const SYNTHETIC_TESTBED: Scenario = buildSyntheticTestbed();
 export const KINGSGATE_JUNCTION: Scenario = buildKingsgateJunction();
-
-/** Select the live scenario: `?scenario=testbed` → the synthetic graph, else the
- *  KINGSGATE junction (the default). */
-export function scenarioById(id: string | null): Scenario {
-  return id === "testbed" ? SYNTHETIC_TESTBED : KINGSGATE_JUNCTION;
-}

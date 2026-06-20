@@ -108,20 +108,44 @@ describe("reactive AI controller", () => {
     expect(state.chainage).toBeGreaterThan(postS - 60); // and not stopping absurdly early
   });
 
-  it("AI3 — flipping the aspect to GREEN makes the AI accelerate again", () => {
+  it("AI3 — flipping the aspect to GREEN makes the AI latch power and accelerate away", () => {
     const e = edge("E", straight(2_000, 25, [{ chainage: 1_000, protects: "BLOCK" }]));
     const graph: TrackGraph = { edges: { E: e } };
-    // a slow/standing train short of the post
+    // a standing train short of the post
     let state: SimState = { chainage: 950, speed: 0, brakeActual: 1, time: 0 };
     let pos = { edgeId: "E", s: 950, d: 0 };
-    const before = state.speed;
-    for (let n = 0; n < 40; n++) {
+    for (let n = 0; n < 80; n++) {
       const inputs = aiInputs(e, state, "GREEN", 1_000 - state.chainage, EMU_GTO_4CAR, MU);
       const res = stepOnGraph(graph, ["E"], EMU_GTO_4CAR, state, pos, inputs, 0.05);
       state = res.state;
       pos = res.pos;
     }
-    expect(state.speed).toBeGreaterThan(before);
+    expect(state.speed).toBeGreaterThan(AI_HYST); // truly latched notch, not a trickle
+    expect(state.chainage).toBeGreaterThan(951); // and actually moved off
+  });
+
+  it("cross-edge non-goal: the AI does NOT brake for a red on the NEXT edge (only its current one)", () => {
+    // edge A carries no signals; edge B carries a starter protecting an OCCUPIED
+    // block, so B's signal is RED — but a train on A cannot see it (HLD §1.2).
+    const eA = edge("A", straight(500, 25));
+    const eB = edge("B", straight(500, 25, [{ chainage: 80, protects: "blk" }]), exitFrame(eA));
+    const eBlk = edge("blk", straight(500, 25), exitFrame(eB));
+    const graph: TrackGraph = { edges: { A: eA, B: eB, blk: eBlk } };
+    const block = ["blk"];
+    // a stationary train sitting in the block keeps B's starter RED
+    const recs: TrainRecord[] = [
+      { id: "t", path: ["A", "B", "blk"], pos: { edgeId: "A", s: 350, d: 0 },
+        state: { chainage: 350, speed: 12, brakeActual: 0, time: 0 }, spec: EMU_GTO_4CAR, kind: "ai", served: new Set() },
+      { id: "blocker", path: ["blk"], pos: { edgeId: "blk", s: 50, d: 0 },
+        state: { chainage: 50, speed: 0, brakeActual: 1, time: 0 }, spec: EMU_GTO_4CAR, kind: "ai", served: new Set() },
+    ];
+    let cur = recs;
+    const onA = find(cur, "t").state.speed;
+    // step a few ticks while "t" is still on A
+    for (let n = 0; n < 10; n++) cur = tickAll(graph, cur, block, 0.05, MU, FULL_POWER);
+    const t = find(cur, "t");
+    expect(t.pos.edgeId).toBe("A"); // still on A
+    expect(t.state.speed).toBeGreaterThan(onA); // accelerated — did NOT brake for B's red
   });
 });
 
@@ -145,6 +169,7 @@ describe("MT1 — tickAll is permutation-invariant", () => {
       state: { chainage: 100, speed: 22, brakeActual: 0, time: 0 },
       spec: EMU_GTO_4CAR,
       kind: "player",
+      served: new Set(),
     },
     {
       id: "ai",
@@ -153,6 +178,7 @@ describe("MT1 — tickAll is permutation-invariant", () => {
       state: { chainage: 400, speed: 18, brakeActual: 0, time: 0 },
       spec: EMU_GTO_4CAR,
       kind: "ai",
+      served: new Set(),
     },
   ];
 
@@ -248,6 +274,32 @@ describe("S2 — branch divergence (synthetic testbed)", () => {
   });
 });
 
+// ── the live KINGSGATE junction end-to-end (the oracle review C1 was missing) ──
+
+describe("KINGSGATE junction: the reactive AIs traverse the real route, not freeze at a station", () => {
+  it("ai1 clears the real station starters, diverges onto the loop; ai2 runs the branch to its buffer", () => {
+    const scn = KINGSGATE_JUNCTION;
+    let recs = scn.makeRecords();
+    const drive: SimInputs = { notch: 1, brake: 0, dir: 1, mu: MU, emergency: false };
+    let ai1EverPastApproach = false;
+    for (let n = 0; n < 9_000; n++) {
+      recs = tickAll(scn.graph, recs, scn.blockEdgeIds, 0.05, MU, drive);
+      if (find(recs, "ai1").pos.edgeId !== "K_approach") ai1EverPastApproach = true;
+    }
+    const ai1 = find(recs, "ai1");
+    const ai2 = find(recs, "ai2");
+    // C1 regression guard: the AIs MUST get past K_approach — a freeze at the
+    // Ashcombe starter (~2070) would leave them on K_approach forever.
+    expect(ai1EverPastApproach).toBe(true);
+    expect(["K_loop", "K_onward"]).toContain(ai1.pos.edgeId);
+    // The branch AI completes its booked path to the buffer.
+    expect(ai2.pos.edgeId).toBe("K_branch_buffer");
+    expect(Math.abs(ai2.state.speed)).toBeLessThan(0.5);
+    // The player drove the whole route to the Seahaven terminus.
+    expect(find(recs, "player").pos.edgeId).toBe("K_onward");
+  });
+});
+
 // ── live-wiring faithfulness: the KINGSGATE-junction player == KINGSGATE direct ─
 
 describe("KINGSGATE-junction player reproduces driving KINGSGATE_SEAHAVEN directly", () => {
@@ -269,13 +321,14 @@ describe("KINGSGATE-junction player reproduces driving KINGSGATE_SEAHAVEN direct
       state: createInitialState(0),
       spec: EMU_GTO_4CAR,
       kind: "player",
+      served: new Set(),
     };
     // KINGSGATE direct.
     let mono: SimState = createInitialState(0);
     const drive: SimInputs = { notch: 1, brake: 0, dir: 1, mu: MU, emergency: false };
 
     for (let n = 0; n < 6_000; n++) {
-      [rec] = tickAll(scn.graph, [rec], scn.blockEdgeIds, 0.05, MU, drive);
+      rec = tickAll(scn.graph, [rec], scn.blockEdgeIds, 0.05, MU, drive)[0] as TrainRecord;
       mono = step(EMU_GTO_4CAR, KINGSGATE_SEAHAVEN, mono, drive, 0.05);
       const globalS = (offsets[rec.pos.edgeId] as number) + rec.pos.s;
       expect(globalS).toBeCloseTo(mono.chainage, 6);

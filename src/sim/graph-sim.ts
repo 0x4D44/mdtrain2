@@ -12,10 +12,6 @@ import { aspectAt, nextSignalAhead, speedLimitAt } from "./route";
 import type { Edge, TrackGraph, Path, TrainPosition } from "./graph";
 import { successor } from "./graph";
 
-const EMPTY_SERVED: ReadonlySet<string> = new Set();
-
-/** AI line-speed ceiling, m/s (the EMU's design max). */
-export const AI_LINE_CAP = 44.7;
 /** Bang-bang hysteresis half-band around the target, m/s. */
 export const AI_HYST = 0.5;
 /** Braking safety margin, m: the AI plans to stop this far SHORT of a red post,
@@ -116,8 +112,14 @@ export function aiInputs(
 ): SimInputs {
   const psr = speedLimitAt(edge.route, state.chainage);
   const curveCeil = brakingCurveCeiling(aspectAhead, distToSignalAhead, spec);
-  const target = Math.min(psr, curveCeil, AI_LINE_CAP);
+  const target = Math.min(psr, curveCeil, spec.speedMax);
   const v = Math.abs(state.speed);
+  // A target at or below the hysteresis band means "come to / hold a stand" (a red
+  // braking-curve ceiling at the post): apply the brake so the train holds rather
+  // than coasting in the band and creeping on a grade.
+  if (target <= AI_HYST) {
+    return { notch: 0, brake: 1, dir: 1, mu, emergency: false };
+  }
   return {
     notch: v < target - AI_HYST ? 1 : 0,
     brake: v > target + AI_HYST ? 1 : 0,
@@ -136,6 +138,11 @@ export interface TrainRecord {
   state: SimState;
   spec: TrainSpec;
   kind: "player" | "ai";
+  /** Stations this train serves (its booked stops are assumed made), so their
+   *  starters clear for it. Block tokens still gate it via aspectSource. Unused
+   *  for the player (driven by playerInputs, not aiInputs). Empty for a train
+   *  whose path carries no station starters (e.g. the synthetic testbed). */
+  served: ReadonlySet<string>;
 }
 
 /** Distance from the train to the next signal post AHEAD on its CURRENT edge, or
@@ -147,7 +154,9 @@ function distToSignalAhead(graph: TrackGraph, r: TrainRecord): number {
 }
 
 /** The aspect of the next signal AHEAD on the train's CURRENT edge, GREEN if none.
- *  AIs serve no stations (base served = ∅), so only clear-block tokens matter. */
+ *  The AI's source is its served stations (its booked stops, so those starters
+ *  clear) ∪ the clear-block tokens — so a station starter on the AI's path does
+ *  NOT hold it, only an occupied block does. */
 function aspectAheadFor(
   graph: TrackGraph,
   r: TrainRecord,
@@ -157,7 +166,7 @@ function aspectAheadFor(
   const edge = graph.edges[r.pos.edgeId] as Edge;
   const n = nextSignalAhead(edge.route, r.state.chainage, 1);
   if (!n) return "GREEN";
-  return aspectAt(edge.route, n.i, aspectSource(EMPTY_SERVED, blockEdgeIds, occByOthers));
+  return aspectAt(edge.route, n.i, aspectSource(r.served, blockEdgeIds, occByOthers));
 }
 
 /**

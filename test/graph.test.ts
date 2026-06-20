@@ -196,6 +196,12 @@ describe("validateGraph structural invariants", () => {
     expect(defects.some((d) => d.kind === "repeat-edge")).toBe(true);
   });
 
+  it("UNKNOWN-EDGE — a path referencing a missing edge id is rejected", () => {
+    const { graph } = chain([{ id: "e1", route: straight(1_000) }]);
+    const defects = validateGraph(graph, [["e1", "ghost"]], new Set(), 45);
+    expect(defects.some((d) => d.kind === "unknown-edge")).toBe(true);
+  });
+
   it("P3 — sub-250 m radius, a band on a curve, and over-ceiling cant are each caught", () => {
     const tight: Route = {
       length: 1_000,
@@ -269,6 +275,18 @@ describe("sliceRoute", () => {
   it("throws on a cut that truncates the viaduct band", () => {
     // 8050 is the viaduct centre — but it sits on a κ=0 straight, so the band guard fires
     expect(() => sliceRoute(KINGSGATE_SEAHAVEN, 0, 8_050)).toThrow(/band|truncates/);
+  });
+
+  it("throws when a slice retains a signal but drops its protected station (orphaned cascade)", () => {
+    const r: Route = {
+      length: 1_200,
+      stations: [{ name: "Sta", chainage: 100, platformHalf: 20 }],
+      grades: [{ from: 0, to: 1_200, value: 0 }],
+      speedLimits: [{ from: 0, to: 1_200, value: 20 }],
+      curvatures: [{ from: 0, to: 1_200, value: 0 }],
+      signals: [{ chainage: 500, protects: "Sta" }], // protected station 100 is outside [300,1000)
+    };
+    expect(() => sliceRoute(r, 300, 1_000)).toThrow(/orphan|protects/);
   });
 
   it("accepts the KINGSGATE-junction cut points 6100 and 7100", () => {
