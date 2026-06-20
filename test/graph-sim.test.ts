@@ -124,6 +124,41 @@ describe("reactive AI controller", () => {
     expect(state.chainage).toBeGreaterThan(951); // and actually moved off
   });
 
+  it("C2 — a red-held AI on a DOWNHILL grade holds its stand and does not creep past the post", () => {
+    const post = 300;
+    const e = edge("E", {
+      length: 1_000,
+      stations: [],
+      grades: [{ from: 0, to: 1_000, value: -0.01 }], // downhill: gravity pulls a coasting train forward
+      speedLimits: [{ from: 0, to: 1_000, value: 25 }],
+      curvatures: [{ from: 0, to: 1_000, value: 0 }],
+      signals: [{ chainage: post, protects: "BLOCK" }],
+    });
+    const graph: TrackGraph = { edges: { E: e } };
+    let state: SimState = { chainage: 0, speed: 12, brakeActual: 0, time: 0 };
+    let pos = { edgeId: "E", s: 0, d: 0 };
+    // brake to a stand at/before the post
+    for (let n = 0; n < 4_000 && state.speed > 0.05; n++) {
+      const inputs = aiInputs(e, state, "RED", post - state.chainage, EMU_GTO_4CAR, MU);
+      const res = stepOnGraph(graph, ["E"], EMU_GTO_4CAR, state, pos, inputs, 0.05);
+      state = res.state;
+      pos = res.pos;
+    }
+    const stopped = state.chainage;
+    expect(stopped).toBeLessThanOrEqual(post);
+    // hold for many more ticks: WITHOUT the holding brake the train coasts down the
+    // grade and creeps past the post; WITH it (target ≤ band ⇒ brake=1) it holds.
+    for (let n = 0; n < 600; n++) {
+      const inputs = aiInputs(e, state, "RED", post - state.chainage, EMU_GTO_4CAR, MU);
+      const res = stepOnGraph(graph, ["E"], EMU_GTO_4CAR, state, pos, inputs, 0.05);
+      state = res.state;
+      pos = res.pos;
+    }
+    expect(state.chainage).toBeLessThanOrEqual(post); // never crept past the red
+    expect(state.chainage).toBeLessThan(stopped + 3); // held within a few m of the stand
+    expect(Math.abs(state.speed)).toBeLessThan(0.2);
+  });
+
   it("cross-edge non-goal: the AI does NOT brake for a red on the NEXT edge (only its current one)", () => {
     // edge A carries no signals; edge B carries a starter protecting an OCCUPIED
     // block, so B's signal is RED — but a train on A cannot see it (HLD §1.2).
