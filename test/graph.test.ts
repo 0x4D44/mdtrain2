@@ -3,6 +3,7 @@ import type { Route } from "../src/sim/route";
 import { KINGSGATE_SEAHAVEN } from "../src/sim/route";
 import { step, type SimInputs, type SimState } from "../src/sim/simulation";
 import { EMU_GTO_4CAR } from "../src/sim/train";
+import { stepOnGraph } from "../src/sim/graph-sim";
 import { planarPoseAt, heightAt, placeOnCentreline } from "../src/sim/centerline";
 import {
   IDENTITY_FRAME,
@@ -274,5 +275,117 @@ describe("sliceRoute", () => {
     expect(() => sliceRoute(KINGSGATE_SEAHAVEN, 0, 6_100)).not.toThrow();
     expect(() => sliceRoute(KINGSGATE_SEAHAVEN, 6_100, 7_100)).not.toThrow();
     expect(() => sliceRoute(KINGSGATE_SEAHAVEN, 7_100, 14_000)).not.toThrow();
+  });
+});
+
+// ── the join: stepOnGraph (G-DIFF / O-STEP-PARITY / J1–J3) ─────────────────────
+
+// A route straight at the join (cut 250, κ=0) with a curve before it and a
+// constant grade — the HLD's G-DIFF exactness conditions.
+const GD: Route = {
+  length: 500,
+  stations: [],
+  grades: [{ from: 0, to: 500, value: -0.004 }], // constant across the join
+  speedLimits: [{ from: 0, to: 500, value: 60 }], // PSR is not read by the dynamics
+  curvatures: [
+    { from: 0, to: 100, value: 0 },
+    { from: 100, to: 180, value: 1 / 500 }, // a curve in edge A
+    { from: 180, to: 500, value: 0 }, // straight across the cut at 250
+  ],
+  signals: [],
+};
+
+describe("G-DIFF — graph carry == one concatenated route (distance AND pose, 1e-9)", () => {
+  it("agrees at every step across the A→B join", () => {
+    const eA = edge("A", sliceRoute(GD, 0, 250), IDENTITY_FRAME);
+    const eB = edge("B", sliceRoute(GD, 250, 500), exitFrame(eA));
+    const graph: TrackGraph = { edges: { A: eA, B: eB } };
+    const path = ["A", "B"];
+
+    let gState: SimState = { chainage: 0, speed: 35, brakeActual: 0, time: 0 };
+    let gPos = { edgeId: "A", s: 0, d: 0 };
+    let mState: SimState = { chainage: 0, speed: 35, brakeActual: 0, time: 0 };
+    const drive: SimInputs = { notch: 1, brake: 0, dir: 1, mu: 0.5, emergency: false };
+
+    for (let n = 0; n < 180; n++) {
+      const g = stepOnGraph(graph, path, EMU_GTO_4CAR, gState, gPos, drive, 0.05);
+      gState = g.state;
+      gPos = g.pos;
+      mState = step(EMU_GTO_4CAR, GD, mState, drive, 0.05);
+
+      const globalS = (gPos.edgeId === "A" ? 0 : 250) + gPos.s;
+      expect(globalS).toBeCloseTo(mState.chainage, 9);
+      expect(gState.speed).toBeCloseTo(mState.speed, 9);
+
+      const curEdge = graph.edges[gPos.edgeId] as Edge;
+      const gp = placeOnEdge(curEdge, gPos.s, 1.5);
+      const mp = placeOnCentreline(GD, mState.chainage, 1.5);
+      expect(gp.x).toBeCloseTo(mp.x, 9);
+      expect(gp.y).toBeCloseTo(mp.y, 9);
+      expect(gp.z).toBeCloseTo(mp.z, 9);
+      expect(gp.heading).toBeCloseTo(mp.heading, 9);
+    }
+    expect(gPos.edgeId).toBe("B"); // it really crossed
+  });
+});
+
+describe("O-STEP-PARITY — wrapper is a bit-identical no-op on a terminal identity edge", () => {
+  it("matches a direct step() for a fixed input sequence", () => {
+    const e = edge("only", flat(3_000), IDENTITY_FRAME);
+    const graph: TrackGraph = { edges: { only: e } };
+    let gState: SimState = { chainage: 0, speed: 20, brakeActual: 0, time: 0 };
+    let gPos = { edgeId: "only", s: 0, d: 0 };
+    let dState: SimState = { chainage: 0, speed: 20, brakeActual: 0, time: 0 };
+    const drive: SimInputs = { notch: 1, brake: 0, dir: 1, mu: 0.5, emergency: false };
+    for (let n = 0; n < 60; n++) {
+      const g = stepOnGraph(graph, ["only"], EMU_GTO_4CAR, gState, gPos, drive, 0.05);
+      gState = g.state;
+      gPos = g.pos;
+      dState = step(EMU_GTO_4CAR, flat(3_000), dState, drive, 0.05); // default args
+      expect(gState).toEqual(dState);
+      expect(gPos.s).toBe(dState.chainage);
+    }
+  });
+});
+
+describe("J1–J3 — residual carry, world continuity, buffer-stop survival", () => {
+  const drive: SimInputs = { notch: 1, brake: 0, dir: 1, mu: 0.5, emergency: false };
+
+  it("J1 — a forward overshoot lands on the successor with state carried", () => {
+    const eA = edge("A", flat(100), IDENTITY_FRAME);
+    const eB = edge("B", flat(300), exitFrame(eA));
+    const graph: TrackGraph = { edges: { A: eA, B: eB } };
+    const state: SimState = { chainage: 99, speed: 30, brakeActual: 0, time: 5 };
+    const res = stepOnGraph(graph, ["A", "B"], EMU_GTO_4CAR, state, { edgeId: "A", s: 99, d: 2 }, drive, 0.05);
+    expect(res.pos.edgeId).toBe("B");
+    expect(res.pos.s).toBeGreaterThan(0);
+    expect(res.pos.s).toBeLessThan(5);
+    expect(res.pos.d).toBe(2); // render offset carried
+    expect(res.state.chainage).toBe(res.pos.s);
+    expect(res.state.speed).toBeGreaterThan(0);
+    expect(res.state.time).toBeGreaterThan(5);
+  });
+
+  it("J2 — placeOnEdge(parent, length) == placeOnEdge(child, 0) (1e-6)", () => {
+    const eA = edge("A", sliceRoute(GD, 0, 250), IDENTITY_FRAME);
+    const eB = edge("B", sliceRoute(GD, 250, 500), exitFrame(eA));
+    for (const d of [-3, 0, 4]) {
+      const end = placeOnEdge(eA, eA.route.length, d);
+      const start = placeOnEdge(eB, 0, d);
+      expect(start.x).toBeCloseTo(end.x, 6);
+      expect(start.y).toBeCloseTo(end.y, 6);
+      expect(start.z).toBeCloseTo(end.z, 6);
+      expect(start.heading).toBeCloseTo(end.heading, 6);
+    }
+  });
+
+  it("J3 — a terminal edge still clamps at the buffer (speed 0 at route.length)", () => {
+    const e = edge("term", flat(100), IDENTITY_FRAME);
+    const graph: TrackGraph = { edges: { term: e } };
+    const state: SimState = { chainage: 99, speed: 30, brakeActual: 0, time: 0 };
+    const res = stepOnGraph(graph, ["term"], EMU_GTO_4CAR, state, { edgeId: "term", s: 99, d: 0 }, drive, 0.05);
+    expect(res.pos.edgeId).toBe("term"); // stayed on the buffer edge
+    expect(res.state.chainage).toBe(100);
+    expect(res.state.speed).toBe(0);
   });
 });
