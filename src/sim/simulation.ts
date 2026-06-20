@@ -41,6 +41,11 @@ const SUBSTEP = 1 / 240; // fixed-timestep integration for stability/determinism
  * Advance the simulation by `dt` seconds. Pure: returns a new state, mutates
  * nothing. Integrates with a fixed sub-step so behaviour is frame-rate
  * independent and deterministic.
+ *
+ * `clampAtEnd` (default `true`) gates ONLY the forward end-stop. A non-terminal
+ * track-graph edge passes `false` so a train may run past `route.length` with
+ * speed retained and the residual is carried onto the next edge (`stepOnGraph`).
+ * The start-clamp is unaffected. Every existing 5-arg caller is byte-identical.
  */
 export function step(
   spec: TrainSpec,
@@ -48,6 +53,7 @@ export function step(
   state: SimState,
   inputs: SimInputs,
   dt: number,
+  clampAtEnd = true,
 ): SimState {
   let { chainage, speed, brakeActual, time } = state;
   let remaining = Math.min(Math.max(dt, 0), MAX_DT);
@@ -85,7 +91,7 @@ export function step(
     if (chainage <= 0 && speed < 0) {
       chainage = 0;
       speed = 0;
-    } else if (chainage >= route.length && speed > 0) {
+    } else if (clampAtEnd && chainage >= route.length && speed > 0) {
       chainage = route.length;
       speed = 0;
     }
