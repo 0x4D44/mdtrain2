@@ -24,6 +24,8 @@ import type { EnvironmentParams } from "../sim/environment";
 import { centerlineAt, placeOnCentreline, headingAt } from "../sim/centerline";
 import { formationHeight, terrainHeight, anchorY, viaductSpanAt, boreCorridorAt } from "../sim/terrain";
 import { eyePose, cabAttitudeTarget, EYE_HEIGHT, EYE_D } from "../sim/camera";
+import { placeOnEdge, planarPoseOnEdge } from "../sim/graph-geom";
+import type { Edge } from "../sim/graph";
 import { createCab, type CabView } from "./cab";
 import { buildScenery } from "./scenery";
 import { buildWorld, type WorldHandle } from "./terrain-mesh";
@@ -61,6 +63,9 @@ export interface SceneHandle {
    *  scene's world coordinates are the route centreline's, so a track-graph edge
    *  pose drops straight in. */
   addTrainMesh(): TrainMeshHandle;
+  /** Lay rails + sleepers along a track-graph edge (the loop / branch the main
+   *  route's world geometry doesn't cover). Built once. */
+  addEdgeTrack(edge: Edge): void;
 }
 
 // Aspect → lamp emissive colour. DOUBLE_YELLOW lights both amber lamps.
@@ -544,7 +549,61 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
     };
   }
 
-  return { render, resize, addTrainMesh };
+  // ── Rails + sleepers for a track-graph edge (the loop/branch the route-built
+  //    world doesn't cover). Mirrors buildTrackRibbon but reads the edge through
+  //    placeOnEdge. placeOnEdge.y is the formation height (formationHeight ==
+  //    heightAt), so rails sit RAIL_TOP above it — exactly like the main line. ──
+  const edgeSleeperMat = new THREE.MeshStandardMaterial({ color: 0x2a2622, roughness: 0.95 });
+  const EDGE_RAIL_TOP = 0.06, EDGE_RAIL_H = 0.12;
+  function addEdgeTrack(edge: Edge): void {
+    const len = edge.route.length;
+    const segLen = 6;
+    const segN = Math.max(1, Math.ceil(len / segLen));
+    const railGeo = new THREE.BoxGeometry(0.07, EDGE_RAIL_H, 1);
+    const railL = new THREE.InstancedMesh(railGeo, world.railMaterial, segN);
+    const railR = new THREE.InstancedMesh(railGeo, world.railMaterial, segN);
+    const sleeperGeo = new THREE.BoxGeometry(2.6, 0.12, 0.25);
+    const sleeperN = Math.max(1, Math.floor(len / 0.65));
+    const sleepers = new THREE.InstancedMesh(sleeperGeo, edgeSleeperMat, sleeperN);
+    sleepers.receiveShadow = true;
+    const m = new THREE.Matrix4();
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const euler = new THREE.Euler(0, 0, 0, "YXZ");
+    const scl = new THREE.Vector3(1, 1, 1);
+    for (let i = 0; i < segN; i++) {
+      const s0 = i * segLen;
+      const s1 = Math.min(len, (i + 1) * segLen);
+      const sMid = (s0 + s1) / 2;
+      euler.set(0, planarPoseOnEdge(edge, sMid).heading, 0);
+      quat.setFromEuler(euler);
+      scl.set(1, 1, s1 - s0);
+      const cl = placeOnEdge(edge, sMid, -GAUGE / 2);
+      pos.set(cl.x, cl.y + EDGE_RAIL_TOP - EDGE_RAIL_H / 2, cl.z);
+      m.compose(pos, quat, scl);
+      railL.setMatrixAt(i, m);
+      const cr = placeOnEdge(edge, sMid, GAUGE / 2);
+      pos.set(cr.x, cr.y + EDGE_RAIL_TOP - EDGE_RAIL_H / 2, cr.z);
+      m.compose(pos, quat, scl);
+      railR.setMatrixAt(i, m);
+    }
+    scl.set(1, 1, 1);
+    for (let i = 0; i < sleeperN; i++) {
+      const s = (i + 0.5) * 0.65;
+      euler.set(0, planarPoseOnEdge(edge, s).heading, 0);
+      quat.setFromEuler(euler);
+      const c = placeOnEdge(edge, s, 0);
+      pos.set(c.x, c.y - 0.28, c.z);
+      m.compose(pos, quat, scl);
+      sleepers.setMatrixAt(i, m);
+    }
+    railL.instanceMatrix.needsUpdate = true;
+    railR.instanceMatrix.needsUpdate = true;
+    sleepers.instanceMatrix.needsUpdate = true;
+    scene.add(railL, railR, sleepers);
+  }
+
+  return { render, resize, addTrainMesh, addEdgeTrack };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

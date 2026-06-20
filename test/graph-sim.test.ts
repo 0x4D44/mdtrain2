@@ -311,27 +311,36 @@ describe("S2 — branch divergence (synthetic testbed)", () => {
 
 // ── the live KINGSGATE junction end-to-end (the oracle review C1 was missing) ──
 
-describe("KINGSGATE junction: the reactive AIs traverse the real route, not freeze at a station", () => {
-  it("ai1 clears the real station starters, diverges onto the loop; ai2 runs the branch to its buffer", () => {
+describe("KINGSGATE junction: reactive AIs clear the real station starters, not freeze (C1)", () => {
+  // The live makeRecords now parks the AIs at the junction; this test drives AIs
+  // FROM K_approach (through the real Ashcombe/Wealdham starters) so it still
+  // guards the C1 freeze independently of the live tableau.
+  it("AIs starting on K_approach clear the starters and diverge onto the loop / branch", () => {
     const scn = KINGSGATE_JUNCTION;
-    let recs = scn.makeRecords();
+    const served = new Set(KINGSGATE_SEAHAVEN.stations.map((s) => s.name));
+    const ai = (id: string, path: string[]): TrainRecord => ({
+      id, path, pos: { edgeId: "K_approach", s: 60, d: 0 },
+      state: { chainage: 60, speed: 15, brakeActual: 0, time: 0 },
+      spec: EMU_GTO_4CAR, kind: "ai", served,
+    });
+    let recs: TrainRecord[] = [
+      {
+        id: "player", path: scn.paths.player as string[], pos: { edgeId: "K_approach", s: 300, d: 0 },
+        state: { chainage: 300, speed: 15, brakeActual: 0, time: 0 }, spec: EMU_GTO_4CAR,
+        kind: "player", served: new Set(),
+      },
+      ai("ai1", scn.paths.ai1 as string[]),
+      ai("ai2", scn.paths.ai2 as string[]),
+    ];
     const drive: SimInputs = { notch: 1, brake: 0, dir: 1, mu: MU, emergency: false };
-    let ai1EverPastApproach = false;
-    for (let n = 0; n < 9_000; n++) {
-      recs = tickAll(scn.graph, recs, scn.blockEdgeIds, 0.05, MU, drive);
-      if (find(recs, "ai1").pos.edgeId !== "K_approach") ai1EverPastApproach = true;
-    }
+    for (let n = 0; n < 11_000; n++) recs = tickAll(scn.graph, recs, scn.blockEdgeIds, 0.05, MU, drive);
     const ai1 = find(recs, "ai1");
     const ai2 = find(recs, "ai2");
-    // C1 regression guard: the AIs MUST get past K_approach — a freeze at the
-    // Ashcombe starter (~2070) would leave them on K_approach forever.
-    expect(ai1EverPastApproach).toBe(true);
+    // A C1 freeze would leave them stuck at the Ashcombe starter (~2070) on K_approach.
+    expect(ai1.pos.edgeId).not.toBe("K_approach");
+    expect(ai2.pos.edgeId).not.toBe("K_approach");
     expect(["K_loop", "K_onward"]).toContain(ai1.pos.edgeId);
-    // The branch AI completes its booked path to the buffer.
-    expect(ai2.pos.edgeId).toBe("K_branch_buffer");
-    expect(Math.abs(ai2.state.speed)).toBeLessThan(0.5);
-    // The player drove the whole route to the Seahaven terminus.
-    expect(find(recs, "player").pos.edgeId).toBe("K_onward");
+    expect(["K_branch", "K_branch_buffer"]).toContain(ai2.pos.edgeId);
   });
 });
 

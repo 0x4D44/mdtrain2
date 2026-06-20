@@ -124,6 +124,13 @@ if (Number.isFinite(startParam) && startParam > 0) {
   );
 }
 
+// Lay rails for the edges the route-built world doesn't cover: the loop and
+// branch the AIs use. The player's path edges (K_approach/K_through/K_onward) are
+// KINGSGATE slices, so the main route's own track already covers them.
+for (const id of Object.keys(graph.edges)) {
+  if (!playerPath.includes(id)) scene.addEdgeTrack(graph.edges[id] as Edge);
+}
+
 // One world mesh per AI train.
 const aiMeshes = new Map<string, TrainMeshHandle>();
 for (const r of records) if (r.kind === "ai") aiMeshes.set(r.id, scene.addTrainMesh());

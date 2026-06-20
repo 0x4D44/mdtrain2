@@ -190,11 +190,12 @@ function buildKingsgateJunction(): Scenario {
   const through = mkEdge("K_through", throughR, fNode);
   const loop = mkEdge(
     "K_loop",
-    makeLoopRoute(1 / 600, 0.15, throughR.length, hDrop, 40 * MPH, "K_onward"),
+    // A slow passing loop (a unit sits/crawls here for the player to pass).
+    makeLoopRoute(1 / 600, 0.15, throughR.length, hDrop, 8 * MPH, "K_onward"),
     fNode,
   );
   const onward = mkEdge("K_onward", onwardR, exitFrame(through));
-  const branch = mkEdge("K_branch", makeBranchRoute(-1 / 500, 0.4, 500, 40 * MPH), fNode);
+  const branch = mkEdge("K_branch", makeBranchRoute(-1 / 500, 0.4, 500, 8 * MPH), fNode);
   const branchBuf = mkEdge("K_branch_buffer", straightRoute(150, 15 * MPH), exitFrame(branch));
 
   const graph: TrackGraph = {
@@ -219,14 +220,15 @@ function buildKingsgateJunction(): Scenario {
     blockEdgeIds: ["K_onward"],
     stationNames: new Set(KINGSGATE_SEAHAVEN.stations.map((s) => s.name)),
     maxSpeed: 44.7,
-    // Player slightly ahead so it reaches the junction first; AIs follow. The human
-    // drives the player, so this is a starting tableau, not a scripted overtake.
-    // Each AI serves the stations on its booked path, so the real KINGSGATE station
-    // starters clear for it and only the loop-exit block token holds it (C1).
+    // The player starts AT the Kingsgate terminus and drives the main line. The
+    // two AI services sit/crawl at the junction on their own track — one in the
+    // passing loop, one on the branch — for the player to pass. Render offset d=0
+    // so each sits centred on its own rails. The reactive hold is a tested-engine
+    // feature (S1); here it's a present-at-the-junction tableau the human passes.
     makeRecords: () => [
-      mkRecord("player", paths.player as Path, "K_approach", 220, 10, 0, "player", new Set()),
-      mkRecord("ai1", paths.ai1 as Path, "K_approach", 120, 10, 6, "ai", stationsOnPath(graph, paths.ai1 as Path)),
-      mkRecord("ai2", paths.ai2 as Path, "K_approach", 60, 10, -6, "ai", stationsOnPath(graph, paths.ai2 as Path)),
+      mkRecord("player", paths.player as Path, "K_approach", 0, 0, 0, "player", new Set()),
+      mkRecord("ai1", paths.ai1 as Path, "K_loop", 80, 1, 0, "ai", stationsOnPath(graph, paths.ai1 as Path)),
+      mkRecord("ai2", paths.ai2 as Path, "K_branch", 80, 1, 0, "ai", stationsOnPath(graph, paths.ai2 as Path)),
     ],
   };
 }
