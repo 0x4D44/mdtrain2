@@ -352,6 +352,53 @@ function buildRail(size: number, repeat: number, aniso: number): MaterialMaps {
   };
 }
 
+/** Lit-window building facade maps (HLD §2.A). An albedo with a faint window
+ *  grid (tinted per-instance by `buildBuildings`) PLUS a matching emissive map
+ *  with ~half the windows lit warm. At night the low env exposure lets the
+ *  existing bloom turn the emissive windows into a lit skyline; by day the high
+ *  exposure washes them out so the facade reads as ordinary masonry (AC-A).
+ *  Built once; both maps sRGB-pinned per D23. One shared map per DL1 (instancing).
+ *  `seed` lets `quality.ts` request a few variants later (3–4 InstancedMeshes). */
+export function buildFacade(
+  anisotropy = 4,
+  seed = 0x9e3779b9,
+): { albedo: THREE.CanvasTexture; emissive: THREE.CanvasTexture } {
+  // local deterministic RNG (build-once; no Math.random in the frame loop, G3)
+  let t = seed >>> 0;
+  const rnd = (): number => {
+    t = (t + 0x6d2b79f5) >>> 0;
+    let x = t;
+    x = Math.imul(x ^ (x >>> 15), x | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+  const warm = ["#ffd9a0", "#ffcf86", "#ffe6c4", "#cfe0ff", "#fff4d6", "#ffb870"];
+  const W = 128, H = 256;
+  const ac = document.createElement("canvas"); ac.width = W; ac.height = H;
+  const a = ac.getContext("2d") as CanvasRenderingContext2D;
+  const ec = document.createElement("canvas"); ec.width = W; ec.height = H;
+  const e = ec.getContext("2d") as CanvasRenderingContext2D;
+  // Mid-grey masonry base so the per-instance tint reads; black emissive base.
+  a.fillStyle = "rgb(120,122,128)"; a.fillRect(0, 0, W, H);
+  e.fillStyle = "#000"; e.fillRect(0, 0, W, H);
+  const cols = 5, rows = 13, padX = 10, padY = 10;
+  const cw = (W - padX * 2) / cols, ch = (H - padY * 2) / rows;
+  const ww = cw * 0.62, wh = ch * 0.6;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const wx = padX + c * cw + (cw - ww) / 2;
+      const wy = padY + r * ch + (ch - wh) / 2;
+      a.fillStyle = "#3a3c42"; a.fillRect(wx, wy, ww, wh); // dark pane in the albedo
+      if (rnd() < 0.5) {
+        const col = warm[Math.floor(rnd() * warm.length)] as string;
+        e.fillStyle = col; e.fillRect(wx, wy, ww, wh); // lit window -> emissive
+        a.globalAlpha = 0.4; a.fillStyle = col; a.fillRect(wx, wy, ww, wh); a.globalAlpha = 1;
+      }
+    }
+  }
+  return { albedo: albedoTexture(ac, 1, anisotropy), emissive: albedoTexture(ec, 1, anisotropy) };
+}
+
 /**
  * Build the full procedural texture set ONCE. `anisotropy` should be the
  * renderer's capability cap (`renderer.capabilities.getMaxAnisotropy()`); pass

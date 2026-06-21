@@ -25,6 +25,7 @@ import * as THREE from "three";
 import type { Route } from "../sim/route";
 import { placeOnCentreline } from "../sim/centerline";
 import { anchorY, formationHeight, viaductSpanAt, boreCorridorAt } from "../sim/terrain";
+import { buildFacade } from "./textures";
 
 /** Deterministic PRNG (mulberry32) so scenery placement is stable run-to-run. */
 function makeRng(seed: number): () => number {
@@ -184,7 +185,18 @@ function buildBuildings(scene: THREE.Scene, route: Route, gauge: number): void {
   const len = route.length;
   const rnd = makeRng(20260617);
   const N = 240;
-  const mat = new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true });
+  // Lit-window facade (HLD §2.A): one shared albedo + emissive map on the single
+  // InstancedMesh (DL1). instanceColor still tints the masonry per building; the
+  // emissive windows bloom at night, wash out by day. Box UVs stretch the grid per
+  // block — acceptable at night/at speed (R2).
+  const facade = buildFacade(4);
+  const mat = new THREE.MeshStandardMaterial({
+    map: facade.albedo,
+    emissiveMap: facade.emissive,
+    emissive: 0xffffff,
+    emissiveIntensity: 1.2,
+    roughness: 0.88,
+  });
   const blocks = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, N);
   const tints = [0x3a3d44, 0x46413b, 0x3d4248, 0x4a4540, 0x363a40, 0x504a42];
   const minD = gauge / 2 + 12; // well back from the line, beyond the fence

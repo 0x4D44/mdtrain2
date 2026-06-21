@@ -11,7 +11,12 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 await page.goto(url, { waitUntil: "load", timeout: 30000 });
 await page.waitForTimeout(2800);
 await page.keyboard.press("h"); // hide controls panel
-await page.waitForTimeout(400);
+const eCount = Number(process.argv[5] ?? 0); // cycle weather/time-of-day (E) for night
+for (let i = 0; i < eCount; i++) {
+  await page.keyboard.press("e");
+  await page.waitForTimeout(250);
+}
+await page.waitForTimeout(500);
 const opts = { path: out };
 if (clip) {
   const [x, y, w, h] = clip.split(",").map(Number);
