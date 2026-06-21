@@ -1,1 +1,6 @@
 shots/
+node_modules/
+dist/
+e2e/screenshots/
+test-results/
+playwright-report/
