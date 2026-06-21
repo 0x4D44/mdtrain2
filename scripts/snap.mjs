@@ -8,8 +8,8 @@ const browser = await chromium.launch({
   args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-await page.goto(url, { waitUntil: "load", timeout: 30000 });
-await page.waitForTimeout(2800);
+await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+await page.waitForTimeout(3000);
 await page.keyboard.press("h"); // hide controls panel
 const eCount = Number(process.argv[5] ?? 0); // cycle weather/time-of-day (E) for night
 for (let i = 0; i < eCount; i++) {
@@ -17,10 +17,14 @@ for (let i = 0; i < eCount; i++) {
   await page.waitForTimeout(250);
 }
 await page.waitForTimeout(500);
-const opts = { path: out };
+const opts = { path: out, animations: "disabled", timeout: 15000 };
 if (clip) {
   const [x, y, w, h] = clip.split(",").map(Number);
   opts.clip = { x, y, width: w, height: h };
 }
-await page.screenshot(opts);
+try {
+  await page.screenshot(opts);
+} catch (e) {
+  console.error("screenshot failed:", e.message);
+}
 await browser.close();

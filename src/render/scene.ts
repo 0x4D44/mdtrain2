@@ -627,19 +627,21 @@ function buildSignals(scene: THREE.Scene, route: Route): SignalHead[] {
   const heads: SignalHead[] = [];
   const sideD = GAUGE / 2 + 2.2; // signal stands to the right (+d) of the track
   // Larger lit-aspect disc so the head reads as a signal at range (#10).
-  const lampGeo = new THREE.CircleGeometry(0.22, 20);
+  // UK colour-light head (HLD §2.B): spherical lamps recessed in short black hoods
+  // on a black backboard, RED at the BOTTOM. The aspect wiring is UNCHANGED — the
+  // same red/amberTop/amberBot/green materials the pure signalling core drives.
+  const lampGeo = new THREE.SphereGeometry(0.16, 12, 12);
+  const hoodGeo = new THREE.CylinderGeometry(0.23, 0.23, 0.26, 12, 1, true); // open black tube
   const glowTex = makeGlowTexture();
-  // Lighter grey post + a separate dark backboard so the head is legible (#10).
   const postMat = new THREE.MeshStandardMaterial({ color: 0x6c727a, roughness: 0.7, metalness: 0.4 });
   const boardMat = new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 0.95 });
-  // Faint always-on housing ring round each lamp so the unlit head still reads.
-  const housingMat = new THREE.MeshStandardMaterial({
-    color: 0x14171c,
-    emissive: new THREE.Color(0x14171c),
-    emissiveIntensity: 0.25,
-    roughness: 0.8,
-  });
-  const housingGeo = new THREE.RingGeometry(0.22, 0.3, 20);
+  const hoodMat = new THREE.MeshStandardMaterial({ color: 0x0a0b0d, roughness: 0.9, side: THREE.DoubleSide });
+  // The lit lamp faces +Z-local (toward the train after the head's heading+π yaw);
+  // the hood tube's axis (default +Y) is rotated to +Z so it shrouds the lamp.
+  const hoodQuat = new THREE.Quaternion().setFromUnitVectors(
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3(0, 0, 1),
+  );
 
   for (const sig of route.signals) {
     const head = new THREE.Group();
@@ -661,27 +663,28 @@ function buildSignals(scene: THREE.Scene, route: Route): SignalHead[] {
     head.add(board);
 
     const mkLamp = (y: number, color: number): THREE.MeshStandardMaterial => {
-      // Faint always-on housing ring round the disc (legible even when unlit).
-      const housing = new THREE.Mesh(housingGeo, housingMat);
-      housing.position.set(0, y, 0.05);
-      head.add(housing);
       const mat = new THREE.MeshStandardMaterial({
-        color: 0x05070a,
+        color: 0x070707,
         emissive: new THREE.Color(color),
         emissiveIntensity: 0,
         roughness: 0.5,
       });
-      const disc = new THREE.Mesh(lampGeo, mat);
-      // After the head's heading+π yaw, +Z-local points back at the train; the
-      // discs face +Z so the lit lamp is visible to the driver.
-      disc.position.set(0, y, 0.07);
-      head.add(disc);
+      const lamp = new THREE.Mesh(lampGeo, mat);
+      lamp.position.set(0, y, 0.3); // in front of the backboard, toward the train
+      head.add(lamp);
+      const hood = new THREE.Mesh(hoodGeo, hoodMat);
+      hood.quaternion.copy(hoodQuat);
+      hood.position.set(0, y, 0.36); // short tube shrouding the lamp toward the track
+      head.add(hood);
       return mat;
     };
-    const red = mkLamp(4.62, ASPECT_COLOUR.RED);
-    const amberTop = mkLamp(4.2, ASPECT_COLOUR.YELLOW);
-    const amberBot = mkLamp(3.78, ASPECT_COLOUR.YELLOW);
-    const green = mkLamp(3.36, ASPECT_COLOUR.GREEN);
+    // UK 4-aspect, top→bottom: amberBot (upper yellow, lit for DOUBLE_YELLOW only),
+    // green, amberTop (lower yellow, lit for YELLOW + DOUBLE_YELLOW), red (BOTTOM =
+    // danger). 0.42 m spacing. The wiring in updateSignals is unchanged.
+    const amberBot = mkLamp(4.63, ASPECT_COLOUR.YELLOW);
+    const green = mkLamp(4.21, ASPECT_COLOUR.GREEN);
+    const amberTop = mkLamp(3.79, ASPECT_COLOUR.YELLOW);
+    const red = mkLamp(3.37, ASPECT_COLOUR.RED);
 
     const glow = new THREE.Sprite(
       new THREE.SpriteMaterial({
