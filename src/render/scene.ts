@@ -811,7 +811,7 @@ function buildSignals(scene: THREE.Scene, route: Route): SignalHead[] {
 // to that side at the mast, so the wire zig-zags mast-to-mast (#6).
 const OLE_SPACING = 45; // mast pitch, m
 const OLE_STAGGER = 0.2; // contact-wire lateral pull-off at each mast, m
-const OLE_MAST_D = GAUGE / 2 + 3.2; // mast foot offset from the spine, m (out of the near cess)
+const OLE_MAST_D = GAUGE / 2 + 4.7; // mast foot well off the spine, m (clear of the near cess)
 const OLE_WIRE_H = 5.9; // contact-wire height above the formation, m
 const OLE_POST_H = 7.0; // post height, m
 
@@ -870,11 +870,11 @@ function buildLineside(scene: THREE.Scene, route: Route): void {
   const mastN = oleMastCount(route);
   // Lighter steel-grey + metallic/envmap so the near mast reads as a slim grey
   // lattice catching the sky, not a black bar slashing the windscreen (R9 partial).
-  const mastMat = new THREE.MeshStandardMaterial({ color: 0x4b525b, roughness: 0.55, metalness: 0.7, envMapIntensity: 1.4 });
+  const mastMat = new THREE.MeshStandardMaterial({ color: 0x4b525b, roughness: 0.55, metalness: 0.7, envMapIntensity: 1.4, emissive: 0x141a22, emissiveIntensity: 1 });
   // Segmented/tapered post: a tall lower trunk + a slimmer upper section give the
   // box a stepped, lattice-like read without leaving InstancedMesh.
-  const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.26, OLE_POST_H * 0.6, 0.26), mastMat, mastN);
-  const postTops = new THREE.InstancedMesh(new THREE.BoxGeometry(0.16, OLE_POST_H * 0.45, 0.16), mastMat, mastN);
+  const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.18, OLE_POST_H * 0.6, 0.18), mastMat, mastN);
+  const postTops = new THREE.InstancedMesh(new THREE.BoxGeometry(0.12, OLE_POST_H * 0.45, 0.12), mastMat, mastN);
   // Cantilever tube reaching in over the track (long axis = local X).
   const arms = new THREE.InstancedMesh(new THREE.BoxGeometry(2.4, 0.1, 0.1), mastMat, mastN);
   // Registration arm/dropper: one slim box per mast, oriented to reach from the
@@ -994,35 +994,66 @@ function buildLineside(scene: THREE.Scene, route: Route): void {
 function buildContactWire(scene: THREE.Scene, route: Route): void {
   const mastN = oleMastCount(route);
   const spanN = Math.max(1, mastN - 1);
-  const wireMat = new THREE.MeshStandardMaterial({ color: 0x2a2e34, roughness: 0.5, metalness: 0.6 });
-  // Unit-length box along local Y; per-span Y-scale stretches it to span length.
-  const wire = new THREE.InstancedMesh(new THREE.BoxGeometry(0.035, 1, 0.035), wireMat, spanN);
+  const SEG = 4; // messenger segments per span (approximates the catenary sag)
+  const PER = 1 + SEG; // 1 taut contact wire + SEG sagging messenger segments
+  const MESS_RISE = 1.3; // messenger height above the contact wire at the masts, m
+  const SAG = 0.6; // mid-span catenary droop of the messenger, m
+  // Grey steel + sheen so the catenary reads as wires, not a dark slash (R4).
+  const wireMat = new THREE.MeshStandardMaterial({ color: 0x4a4e54, roughness: 0.5, metalness: 0.6, envMapIntensity: 1.2 });
+  const wire = new THREE.InstancedMesh(new THREE.BoxGeometry(0.04, 1, 0.04), wireMat, spanN * PER);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const sc = new THREE.Vector3(1, 1, 1);
   const a = new THREE.Vector3();
   const b = new THREE.Vector3();
+  const p0 = new THREE.Vector3();
+  const p1 = new THREE.Vector3();
   const dir = new THREE.Vector3();
   const mid = new THREE.Vector3();
   const Y_UP = new THREE.Vector3(0, 1, 0);
   const PARK = -1000;
+  // Place a thin box spanning u→v at instance index k.
+  const placeSeg = (k: number, u: THREE.Vector3, v: THREE.Vector3): void => {
+    dir.set(v.x - u.x, v.y - u.y, v.z - u.z);
+    const len = Math.max(0.05, dir.length());
+    mid.set((u.x + v.x) / 2, (u.y + v.y) / 2, (u.z + v.z) / 2);
+    q.setFromUnitVectors(Y_UP, dir.normalize());
+    m.compose(mid, q, sc.set(1, len, 1));
+    wire.setMatrixAt(k, m);
+  };
   for (let i = 0; i < spanN; i++) {
-    // Park the span if either end mast is omitted (no support to hang it from).
+    const base = i * PER;
+    // Park the whole span if either end mast is omitted (no support to hang it).
     if (oleSkip(route, i) || oleSkip(route, i + 1)) {
-      m.compose(a.set(0, PARK, 0), q.identity(), sc.set(1, 1, 1));
-      wire.setMatrixAt(i, m);
+      for (let k = 0; k < PER; k++) {
+        m.compose(p0.set(0, PARK, 0), q.identity(), sc.set(1, 1, 1));
+        wire.setMatrixAt(base + k, m);
+      }
       continue;
     }
     oleWirePoint(route, i, a);
     oleWirePoint(route, i + 1, b);
-    dir.set(b.x - a.x, b.y - a.y, b.z - a.z);
-    const segLen = Math.max(0.05, dir.length());
-    mid.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
-    q.setFromUnitVectors(Y_UP, dir.normalize());
-    m.compose(mid, q, sc.set(1, segLen, 1));
-    wire.setMatrixAt(i, m);
+    placeSeg(base, a, b); // taut contact wire at wire height
+    // Messenger: SEG segments mast-top → mast-top, sagging at mid-span so the pair
+    // reads as catenary, not a single bar.
+    for (let j = 0; j < SEG; j++) {
+      const t0 = j / SEG;
+      const t1 = (j + 1) / SEG;
+      p0.set(
+        a.x + (b.x - a.x) * t0,
+        a.y + (b.y - a.y) * t0 + MESS_RISE - SAG * 4 * t0 * (1 - t0),
+        a.z + (b.z - a.z) * t0,
+      );
+      p1.set(
+        a.x + (b.x - a.x) * t1,
+        a.y + (b.y - a.y) * t1 + MESS_RISE - SAG * 4 * t1 * (1 - t1),
+        a.z + (b.z - a.z) * t1,
+      );
+      placeSeg(base + 1 + j, p0, p1);
+    }
   }
   wire.instanceMatrix.needsUpdate = true;
+  wire.frustumCulled = false;
   scene.add(wire);
 }
 
