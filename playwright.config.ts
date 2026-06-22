@@ -17,7 +17,7 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   reporter: [["list"]],
-  timeout: 120_000, // a single SwiftShader composite/readback of the night scene is ~25s
+  timeout: 180_000, // SwiftShader composite ~25s + the drive shots' frame-accurate taps on a now-heavier scene
   expect: { timeout: 15_000 },
   use: {
     baseURL: "http://localhost:5173",
