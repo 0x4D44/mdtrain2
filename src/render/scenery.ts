@@ -238,8 +238,9 @@ function buildTrees(scene: THREE.Scene, route: Route, gauge: number): void {
   // White base so per-instance instanceColor carries the true foliage tint — a
   // varied palette of greens (+ a couple yellow-green / autumn-brown) so the
   // woodland isn't one flat tone (R11 — the biggest "toy diorama" tell).
-  const foliageMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true });
-  const foliage = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), foliageMat, N);
+  // Subdivided + smooth-shaded so canopies read as leaves, not faceted gems (I2 R3).
+  const foliageMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 });
+  const foliage = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), foliageMat, N);
   const foliageTints = [0x3a6b2f, 0x2f5527, 0x4a7233, 0x586b2c, 0x6f5e34, 0x356048];
   const FOLIAGE_COL = new THREE.Color();
   const minD = gauge / 2 + 7; // clear of the track / fence
@@ -300,8 +301,8 @@ function buildBushes(scene: THREE.Scene, route: Route, gauge: number): void {
   const len = route.length;
   const rnd = makeRng(1234567);
   const N = 520;
-  const bushMat = new THREE.MeshStandardMaterial({ color: 0x2c5128, roughness: 1, flatShading: true });
-  const bushes = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), bushMat, N);
+  const bushMat = new THREE.MeshStandardMaterial({ color: 0x2c5128, roughness: 1 });
+  const bushes = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), bushMat, N);
   const minD = gauge / 2 + 6; // a little closer in than the trees
   let placed = 0;
   let guard = 0;
@@ -450,10 +451,16 @@ function buildOverbridge(scene: THREE.Scene, route: Route, gauge: number, s: num
     wall.position.set(0, deckY + 0.85, pz);
     g.add(wall);
   }
-  // Abutments either side of the track, their feet on the formation.
+  // Abutments either side of the track, feet ANCHORED to the real terrain at the
+  // abutment's lateral offset (not pinned to rail level), so they don't float over
+  // an embankment / sink into a cutting (I2 R6).
+  const soffit = railTop + deckClear;
   for (const ad of [-(gauge / 2 + 4.5), gauge / 2 + 4.5]) {
-    const ab = new THREE.Mesh(new THREE.BoxGeometry(3, deckClear, 5), mat);
-    ab.position.set(ad * 1.6, railTop + deckClear / 2, 0);
+    const latD = ad * 1.6;
+    const footY = anchorY(route, s, latD, 0) - 0.3; // buried a touch below the ground
+    const h = Math.max(1, soffit - footY);
+    const ab = new THREE.Mesh(new THREE.BoxGeometry(3, h, 5), mat);
+    ab.position.set(latD, (footY + soffit) / 2, 0);
     g.add(ab);
   }
   scene.add(g);

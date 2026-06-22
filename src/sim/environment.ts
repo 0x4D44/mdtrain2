@@ -121,7 +121,7 @@ interface Lighting {
   ground: number;
 }
 const LIGHTING: Record<TimeOfDay, Lighting> = {
-  day: { hemiSky: 0xdfe9f5, hemiGround: 0x8f9470, sun: 0xfff6e6, ambI: 1.2, sunI: 2.1, ground: 0x5e6a44 },
+  day: { hemiSky: 0xdfe9f5, hemiGround: 0x9aa07e, sun: 0xfff6e6, ambI: 1.1, sunI: 2.7, ground: 0x5e6a44 },
   dusk: { hemiSky: 0xf2b079, hemiGround: 0x4a3742, sun: 0xff9a52, ambI: 1.0, sunI: 1.35, ground: 0x40392e },
   night: { hemiSky: 0x1a2636, hemiGround: 0x0a1018, sun: 0x8aa0c8, ambI: 0.75, sunI: 0.6, ground: 0x141b22 },
 };
@@ -134,7 +134,7 @@ const clamp = (x: number, lo: number, hi: number): number =>
  * exposure: day > dusk > night (O10). All finite > 0.
  */
 const EXPOSURE: Record<TimeOfDay, number> = {
-  day: 1.0,
+  day: 0.9, // was 1.0 — a touch lower so the stronger directional key reads as form-shadow, not washout (I2 R1)
   dusk: 0.85,
   night: 0.75, // lifted from 0.65 so the rails/ballast silhouette (not a black void)
 };
