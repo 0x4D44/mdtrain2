@@ -58,7 +58,7 @@ const SLEEPER_SPACING = 0.65;
 const BALLAST_HALF = 1.9;
 const BALLAST_DROP = 0.34;
 /** Rail material wet/dry roughness endpoints (driven by env.railWetness). */
-const RAIL_ROUGH_DRY = 0.35;
+const RAIL_ROUGH_DRY = 0.28; // a touch more polished so the day rail crown catches a specular (R9)
 const RAIL_ROUGH_WET = 0.08;
 
 // ── viaduct tuning ───────────────────────────────────────────────────────────

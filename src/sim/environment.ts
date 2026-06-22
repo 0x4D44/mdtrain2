@@ -121,9 +121,9 @@ interface Lighting {
   ground: number;
 }
 const LIGHTING: Record<TimeOfDay, Lighting> = {
-  day: { hemiSky: 0xdfe9f5, hemiGround: 0x8f9470, sun: 0xfff6e6, ambI: 1.5, sunI: 2.1, ground: 0x5e6a44 },
+  day: { hemiSky: 0xdfe9f5, hemiGround: 0x8f9470, sun: 0xfff6e6, ambI: 1.2, sunI: 2.1, ground: 0x5e6a44 },
   dusk: { hemiSky: 0xf2b079, hemiGround: 0x4a3742, sun: 0xff9a52, ambI: 1.0, sunI: 1.35, ground: 0x40392e },
-  night: { hemiSky: 0x1a2636, hemiGround: 0x03040a, sun: 0x8aa0c8, ambI: 0.6, sunI: 0.6, ground: 0x141b22 },
+  night: { hemiSky: 0x1a2636, hemiGround: 0x0a1018, sun: 0x8aa0c8, ambI: 0.75, sunI: 0.6, ground: 0x141b22 },
 };
 
 const clamp = (x: number, lo: number, hi: number): number =>
@@ -170,7 +170,7 @@ const SUN_DIR_RAW: Record<TimeOfDay, { x: number; y: number; z: number }> = {
 /** Linear-ish PBR sun/moon colour per time: warm-white day, orange dusk, cool moon. */
 const SUN_COLOR_PBR: Record<TimeOfDay, number> = {
   day: 0xfff4e0,
-  dusk: 0xff9442,
+  dusk: 0xffae6e, // less saturated so neutral grey ballast/rail keeps its identity at dusk (R9)
   night: 0x7d92c4,
 };
 
