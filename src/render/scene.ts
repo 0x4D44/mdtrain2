@@ -334,12 +334,13 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   const celestial = new THREE.Group();
   celestial.frustumCulled = false;
   const moonDiscMat = new THREE.MeshBasicMaterial({
-    color: 0xeef3ff,
+    color: 0xe8ecf2, // off-white, not a blown pure-white searchlight
     fog: false,
     transparent: true,
     depthWrite: false,
   });
-  const moonDisc = new THREE.Mesh(new THREE.SphereGeometry(40, 24, 16), moonDiscMat);
+  // Near life-size (~0.6° at CELESTIAL_R), not the old 40-unit ~4× searchlight.
+  const moonDisc = new THREE.Mesh(new THREE.SphereGeometry(12, 24, 16), moonDiscMat);
   moonDisc.position.copy(MOON_DIR).multiplyScalar(CELESTIAL_R);
   celestial.add(moonDisc);
   const haloMat = new THREE.SpriteMaterial({
@@ -350,8 +351,8 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
     fog: false,
   });
   const halo = new THREE.Sprite(haloMat);
-  halo.scale.set(820, 820, 1);
-  halo.position.copy(MOON_DIR).multiplyScalar(CELESTIAL_R - 40);
+  halo.scale.set(240, 240, 1); // tight halo, not a 21° ball
+  halo.position.copy(MOON_DIR).multiplyScalar(CELESTIAL_R); // CO-LOCATED with the disc (one core, no parallax double)
   celestial.add(halo);
   // Star field on a fixed dome relative to the group (seeded → stable shots).
   const STAR_N = 520;
@@ -557,7 +558,7 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
     if (celestial.visible) {
       celestial.position.set(eye.x, eye.y, eye.z);
       moonDiscMat.opacity = nf;
-      haloMat.opacity = 0.85 * nf;
+      haloMat.opacity = 0.45 * nf; // softer halo (was 0.85) so the moon isn't a searchlight
       starMat.opacity = nf;
     }
 

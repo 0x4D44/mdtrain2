@@ -159,7 +159,9 @@ const SUN_DIR_RAW: Record<TimeOfDay, { x: number; y: number; z: number }> = {
   // outdoor depth cue. Dusk/night left as-is (their shading already reads).
   day: { x: -0.55, y: 0.6, z: 0.32 },
   dusk: { x: -0.8, y: 0.25, z: 0.1 },
-  night: { x: 0.2, y: 0.55, z: -0.4 },
+  // Match the VISIBLE moon (scene.ts MOON_DIR ≈ (-0.2,0.4,0.9)) so moonlit sheen
+  // falls on the moon-facing side — not ~160° away as before (R2).
+  night: { x: -0.2, y: 0.4, z: 0.9 },
 };
 
 /** Linear-ish PBR sun/moon colour per time: warm-white day, orange dusk, cool moon. */

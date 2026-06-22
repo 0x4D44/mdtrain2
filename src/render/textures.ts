@@ -569,8 +569,8 @@ export function makeRadialGlowTexture(colorHex: number): THREE.CanvasTexture {
     const b = Math.round(c.b * 255);
     const cx = size / 2;
     const grad = ctx.createRadialGradient(cx, cx, 0, cx, cx, cx);
-    grad.addColorStop(0, `rgba(${r},${g},${b},0.9)`);
-    grad.addColorStop(0.3, `rgba(${r},${g},${b},0.32)`);
+    grad.addColorStop(0, `rgba(${r},${g},${b},0.55)`);
+    grad.addColorStop(0.25, `rgba(${r},${g},${b},0.22)`);
     grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, size, size);
