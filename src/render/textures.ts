@@ -268,13 +268,14 @@ export interface TextureSet {
 function buildGround(size: number, repeat: number, aniso: number): MaterialMaps {
   // Patchy grass with earthy lows; gentle macro relief, fine blade detail.
   const { height, detail } = sampleFields(size, 4, 4, 16, 3, 1311);
-  const earth: RGB = [86, 66, 40];
-  const grassDark: RGB = [48, 70, 32];
-  const grassLight: RGB = [96, 122, 56];
+  const earth: RGB = [80, 64, 42];
+  const grassDark: RGB = [40, 56, 28]; // darker, less vivid than a mown lawn
+  const grassLight: RGB = [86, 104, 54]; // cooler/duller green
   const albedo = buildAlbedoCanvas(size, height, detail, (h, n) => {
-    // Low patches → earth; high → grass; detail breaks up the green.
-    const base = mix(grassDark, grassLight, n);
-    const withEarth = mix(earth, base, smooth(Math.min(1, h * 1.3)));
+    // Macro field BANDS the grass tone at metre scale (kills the uniform-lawn read);
+    // detail breaks it up; broad earthy/dry patches in the lows.
+    const base = mix(grassDark, grassLight, n * 0.55 + h * 0.45);
+    const withEarth = mix(earth, base, smooth(Math.min(1, h * 0.95 + 0.1)));
     return withEarth;
   });
   // Relief from both macro lumps and blade detail.
@@ -291,15 +292,16 @@ function buildGround(size: number, repeat: number, aniso: number): MaterialMaps 
 
 function buildBallast(size: number, repeat: number, aniso: number): MaterialMaps {
   // Coarse grey crushed stone: strong high-frequency detail, low macro drift.
-  const { height, detail } = sampleFields(size, 8, 2, 32, 4, 5101);
-  const dark: RGB = [60, 58, 56];
-  const light: RGB = [140, 136, 130];
+  const { height, detail } = sampleFields(size, 8, 2, 48, 4, 5101); // finer stones (32→48)
+  const dark: RGB = [50, 48, 45]; // darker voids between stones
+  const light: RGB = [168, 162, 150]; // brighter lit stone faces
   const albedo = buildAlbedoCanvas(size, height, detail, (_h, n) => {
-    const t = smooth(n);
+    // Push contrast so distinct stones read (not a smooth pale-grey ribbon).
+    const t = smooth(Math.max(0, Math.min(1, (n - 0.32) / 0.36)));
     return mix(dark, light, t);
   });
   // Sharp stone relief from the high-frequency detail field.
-  const normal = buildNormalCanvas(size, detail, 5.0);
+  const normal = buildNormalCanvas(size, detail, 6.0); // sharper (5→6)
   return {
     albedo: albedoTexture(albedo, repeat, aniso),
     normal: dataTexture(normal, repeat, aniso),
@@ -334,11 +336,11 @@ function buildMasonry(size: number, repeat: number, aniso: number): MaterialMaps
 function buildRail(size: number, repeat: number, aniso: number): MaterialMaps {
   // Subtle brushed steel: nearly uniform grey, faint vertical streaks.
   const { height, detail } = sampleFields(size, 2, 2, 48, 2, 211);
-  const dark: RGB = [96, 98, 104];
-  const light: RGB = [150, 152, 158];
+  const dark: RGB = [108, 110, 116];
+  const light: RGB = [182, 185, 193]; // brighter so the rail reads as polished steel, not matte
   const relief = new Float32Array(size * size);
   const albedo = buildAlbedoCanvas(size, height, detail, (_h, n) => {
-    const t = smooth(n * 0.6 + 0.2);
+    const t = smooth(n * 0.5 + 0.45); // biased bright (running steel catches daylight)
     return mix(dark, light, t);
   });
   // Faint lengthwise brushing → mostly flat normal.
