@@ -510,10 +510,10 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
     // Per-time zenith darkening: a bright, near-uniform dome by day (real skies are
     // brightest near the horizon, NOT darkest overhead — the old flat 0.35 inverted
     // that) deepening to a dark zenith at night, driven by nightFactor.
-    skyUniforms.topColor.value.setHex(env.skyColor).multiplyScalar(0.88 - 0.56 * env.nightFactor);
-    skyUniforms.bottomColor.value.setHex(env.skyColor);
+    skyUniforms.topColor.value.setHex(env.skyColor).multiplyScalar(0.8 - 0.48 * env.nightFactor); // deeper day zenith
+    skyUniforms.bottomColor.value.setHex(env.horizonColor); // distinct pale/warm horizon band (R3)
     const fog = scene.fog as THREE.Fog;
-    fog.color.setHex(env.skyColor);
+    fog.color.setHex(env.horizonColor); // distance hazes into the horizon, not the zenith
     fog.near = env.fogNear;
     fog.far = env.fogFar;
     hemi.color.setHex(env.hemiSky);

@@ -196,6 +196,9 @@ describe("O12: new fields pure & finite across the domain", () => {
         expect(Number.isFinite(p.nightFactor)).toBe(true);
         expect(p.nightFactor).toBeGreaterThanOrEqual(0);
         expect(p.nightFactor).toBeLessThanOrEqual(1);
+        expect(Number.isFinite(p.horizonColor)).toBe(true);
+        expect(p.horizonColor).toBeGreaterThanOrEqual(0);
+        expect(p.horizonColor).toBeLessThanOrEqual(0xffffff);
       }
     }
   });
@@ -210,6 +213,7 @@ describe("O12: new fields pure & finite across the domain", () => {
         expect(a.sunColorPbr).toBe(b.sunColorPbr);
         expect(a.sunDir).toEqual(b.sunDir);
         expect(a.nightFactor).toBe(b.nightFactor);
+        expect(a.horizonColor).toBe(b.horizonColor);
       }
     }
   });

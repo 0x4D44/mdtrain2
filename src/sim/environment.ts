@@ -18,8 +18,11 @@ export interface EnvironmentParams {
   /** Rail adhesion → resolveInputs (feeds real traction/brake caps). */
   mu: number;
   // visuals (consumed by scene.ts; all plain numbers/hex so they stay testable)
-  /** hex; also the fog colour. */
+  /** hex — the zenith sky colour. */
   skyColor: number;
+  /** hex — the (paler/warmer by day) horizon-band colour, distinct from the zenith
+   *  `skyColor`; also the fog/haze colour so distance washes into the horizon. */
+  horizonColor: number;
   fogNear: number;
   fogFar: number;
   /** hemisphere light intensity. */
@@ -233,14 +236,16 @@ export function environmentParams(env: Environment): EnvironmentParams {
   // Sky/fog colour: deep blue at night, lighter toward day; greyer (less blue)
   // and tighter range when stormy. Encoded as a single hex RGB.
   const skyColor = skyColorFor(env.time, storminess);
+  // The horizon band is distinct from the zenith: pale/luminous by day, warm at
+  // dusk, faintly-lit deep blue at night — and it's the fog/haze colour so distant
+  // land washes into it (R3 — kills the flat monochrome sky-card + knife horizon).
+  const horizonColor = horizonColorFor(env.time, storminess);
 
-  // Fog: open by day, tighter at night and in storm. Generous far plane so the
-  // line and scenery read into the distance.
+  // Fog: open by day, tighter at night and in storm. Pulled in so aerial
+  // perspective ALWAYS bites and the far ground hazes before its edge (R5).
   const dayness = env.time === "day" ? 1 : env.time === "dusk" ? 0.6 : 0;
   const fogNear = 14 + 12 * dayness; // 14 (night) .. 26 (day)
-  // Tighter than before so aerial perspective ALWAYS bites — the far ground fades
-  // into haze instead of ending at a knife-edge horizon (~220 day clear, 70 night).
-  const fogFar = 70 + 150 * dayness - 50 * storminess; // open day, tighter storm/night
+  const fogFar = 70 + 90 * dayness - 40 * storminess; // ~160 day clear, 70 night
 
   // Realism palette (HLD §2.3). exposure & sun colour/dir depend on time only;
   // bloom on time×weather. sunDir is normalised to a unit vector (O11).
@@ -253,6 +258,7 @@ export function environmentParams(env: Environment): EnvironmentParams {
   return {
     mu,
     skyColor,
+    horizonColor,
     fogNear,
     fogFar,
     ambientIntensity,
@@ -282,6 +288,26 @@ function skyColorFor(time: TimeOfDay, storminess: number): number {
   };
   const c = base[time];
   // Storm pulls toward a darker neutral grey (deeper, less saturated).
+  const grey = 0x20;
+  const t = 0.4 * storminess;
+  const r = Math.round(c.r * (1 - t) + grey * t);
+  const g = Math.round(c.g * (1 - t) + grey * t);
+  const bl = Math.round(c.b * (1 - t) + grey * t);
+  return (r << 16) | (g << 8) | bl;
+}
+
+/**
+ * The horizon-band colour (R3): paler/brighter than the zenith by day (real skies
+ * are brightest low), warm at dusk, and a touch lighter than the deep zenith at
+ * night so the line silhouettes. Greyed by storminess like the sky. Returns hex RGB.
+ */
+function horizonColorFor(time: TimeOfDay, storminess: number): number {
+  const base: Record<TimeOfDay, { r: number; g: number; b: number }> = {
+    night: { r: 0x16, g: 0x22, b: 0x3c }, // faintly-lit deep-blue horizon
+    dusk: { r: 0x4c, g: 0x3c, b: 0x44 }, // gentle warm-low — keeps the praised violet golden hour
+    day: { r: 0xcd, g: 0xd2, b: 0xd2 }, // pale luminous haze, brighter than the zenith
+  };
+  const c = base[time];
   const grey = 0x20;
   const t = 0.4 * storminess;
   const r = Math.round(c.r * (1 - t) + grey * t);
