@@ -361,6 +361,10 @@ function buildBuildings(scene: THREE.Scene, route: Route, gauge: number): THREE.
   const tints = [0xb08868, 0xc8b89a, 0xa8aab0, 0xbfa884, 0xc2c4c0, 0x9c8a72];
   const minD = gauge / 2 + 12; // well back from the line, beyond the fence
   const col = new THREE.Color();
+  // Dark concrete parapet caps so blocks aren't bare flat-topped slabs (R7).
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.95 });
+  const roofs = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), roofMat, N);
+  const bq = new THREE.Quaternion();
   // Two urban zones: (centre chainage, half-length, max height, lateral reach).
   const zones = [
     { c: 700, half: 1100, maxH: 26, reach: 150 }, // Kingsgate city (0–1800)
@@ -382,20 +386,35 @@ function buildBuildings(scene: THREE.Scene, route: Route, gauge: number): THREE.
     const baseY = anchorY(route, s, d, 0);
     // Taller close in, shorter far out; jittered. Footprint scales loosely with it.
     const near = 1 - Math.min(1, Math.abs(d) / (minD + zone.reach));
-    const h = 4 + near * zone.maxH * (0.4 + rnd() * 0.6);
+    // Widen the height spread — ~30% are deliberately low (2–4 storey) so the
+    // rooftop line steps irregularly, not a row of equal slabs (R7).
+    const low = rnd() < 0.3;
+    const h = low ? 5 + rnd() * 6 : 6 + near * zone.maxH * (0.5 + rnd() * 0.5);
     const w = 5 + rnd() * 9;
     const dpt = 5 + rnd() * 9;
-    TMP_M.compose(TMP_P.set(place.x, baseY + h / 2, place.z), NOROT, TMP_S.set(w, h, dpt));
+    // Roughly face the track with a small yaw jitter so frontages aren't all
+    // square to the world axes (R7).
+    bq.setFromAxisAngle(Y_AXIS, place.heading + (rnd() - 0.5) * 0.3);
+    TMP_M.compose(TMP_P.set(place.x, baseY + h / 2, place.z), bq, TMP_S.set(w, h, dpt));
     blocks.setMatrixAt(placed, TMP_M);
     const tint = tints[Math.floor(rnd() * tints.length)] ?? 0x3a3d44;
     blocks.setColorAt(placed, col.setHex(tint));
+    // Parapet cap: a thin box slightly proud of the roofline.
+    TMP_M.compose(TMP_P.set(place.x, baseY + h + 0.25, place.z), bq, TMP_S.set(w * 1.04, 0.5, dpt * 1.04));
+    roofs.setMatrixAt(placed, TMP_M);
     placed++;
   }
-  for (let i = placed; i < N; i++) placeBox(blocks, i, 0, -1000, 0, 1, 1, 1);
+  for (let i = placed; i < N; i++) {
+    placeBox(blocks, i, 0, -1000, 0, 1, 1, 1);
+    placeBox(roofs, i, 0, -1000, 0, 1, 1, 1);
+  }
   blocks.instanceMatrix.needsUpdate = true;
   if (blocks.instanceColor) blocks.instanceColor.needsUpdate = true;
+  roofs.instanceMatrix.needsUpdate = true;
   blocks.frustumCulled = false;
+  roofs.frustumCulled = false;
   scene.add(blocks);
+  scene.add(roofs);
   return mat;
 }
 
