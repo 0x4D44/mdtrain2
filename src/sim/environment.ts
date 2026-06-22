@@ -49,6 +49,9 @@ export interface EnvironmentParams {
   sunColorPbr: number;
   /** per time×weather bloom strength. Finite ≥ 0; night×rain strongest (O10). */
   bloomStrength: number;
+  /** 0 (day) … 1 (night): how strongly the celestial layer (moon disc + halo +
+   *  stars) reads. Time-only, strictly increasing day < dusk < night (O13). */
+  nightFactor: number;
 }
 
 /** The default setting and the ring's first entry — a bright, clearly-visible
@@ -131,6 +134,18 @@ const EXPOSURE: Record<TimeOfDay, number> = {
   day: 1.0,
   dusk: 0.85,
   night: 0.65,
+};
+
+/**
+ * Celestial visibility per time-of-day (HLD §2.D): 0 by day (moon/stars washed
+ * out by exposure), a faint hint at dusk, full at night. Time-only (a clear sky
+ * vs cloud is a later refinement); strictly increasing day < dusk < night (O13),
+ * so it gives scene.ts a single clean scalar to fade the moon/halo/star layer.
+ */
+const NIGHT_FACTOR: Record<TimeOfDay, number> = {
+  day: 0,
+  dusk: 0.2,
+  night: 1,
 };
 
 /**
@@ -226,6 +241,7 @@ export function environmentParams(env: Environment): EnvironmentParams {
   const sunDir = unit(SUN_DIR_RAW[env.time]);
   const sunColorPbr = SUN_COLOR_PBR[env.time];
   const bloomStrength = darknessBloom[env.time] * wetGlowBloom[env.weather];
+  const nightFactor = NIGHT_FACTOR[env.time];
 
   return {
     mu,
@@ -245,6 +261,7 @@ export function environmentParams(env: Environment): EnvironmentParams {
     sunDir,
     sunColorPbr,
     bloomStrength,
+    nightFactor,
   };
 }
 

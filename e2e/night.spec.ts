@@ -77,10 +77,22 @@ async function drive(page: Page, seconds: number): Promise<void> {
   }
 }
 
+/** Drag the driver's head (LMB) to look around: dy<0 looks up, dx>0 looks right. */
+async function lookAround(page: Page, dx: number, dy: number): Promise<void> {
+  const cx = 640;
+  const cy = 400;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + dx, cy + dy, { steps: 12 });
+  await page.mouse.up();
+  await frames(page, 2);
+}
+
 interface Shot {
   name: string;
   s: number; // ?s= seed chainage (frames a set-piece without driving there)
   drive?: number; // seconds to drive after seeding (0/undefined = static)
+  look?: { dx: number; dy: number }; // optional head turn before the capture
 }
 
 // Set-pieces along KINGSGATE_SEAHAVEN. Signals sit at 2120 / 5920 / 9920 and face
@@ -95,6 +107,7 @@ const SHOTS: Shot[] = [
   { name: "06-viaduct", s: 7950 },
   { name: "07-signal-brinemouth", s: 9895 },
   { name: "08-drive-kingsgate", s: 60, drive: 6 },
+  { name: "09-moon", s: 4300, look: { dx: 0, dy: -45 } }, // tilt up to frame the hero moon (right pane)
 ];
 
 for (const sh of SHOTS) {
@@ -117,6 +130,7 @@ for (const sh of SHOTS) {
     await tap(page, "KeyH"); // hide the help panel (shown by default)
     await setNight(page);
     if (sh.drive && sh.drive > 0) await drive(page, sh.drive);
+    if (sh.look) await lookAround(page, sh.look.dx, sh.look.dy);
     await page.waitForTimeout(400);
 
     await shot(page, `${SCREENS}/${sh.name}.png`);

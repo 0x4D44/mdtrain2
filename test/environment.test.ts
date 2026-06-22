@@ -193,6 +193,9 @@ describe("O12: new fields pure & finite across the domain", () => {
         expect(Number.isFinite(p.sunDir.x)).toBe(true);
         expect(Number.isFinite(p.sunDir.y)).toBe(true);
         expect(Number.isFinite(p.sunDir.z)).toBe(true);
+        expect(Number.isFinite(p.nightFactor)).toBe(true);
+        expect(p.nightFactor).toBeGreaterThanOrEqual(0);
+        expect(p.nightFactor).toBeLessThanOrEqual(1);
       }
     }
   });
@@ -206,7 +209,30 @@ describe("O12: new fields pure & finite across the domain", () => {
         expect(a.bloomStrength).toBe(b.bloomStrength);
         expect(a.sunColorPbr).toBe(b.sunColorPbr);
         expect(a.sunDir).toEqual(b.sunDir);
+        expect(a.nightFactor).toBe(b.nightFactor);
       }
+    }
+  });
+});
+
+describe("O13: nightFactor ordered & bounded (celestial-layer visibility)", () => {
+  // Time-only: the celestial layer is washed out by day and full at night, with a
+  // faint hint at dusk. Strictly increasing day < dusk < night for every weather;
+  // pinned at the endpoints so scene.ts can rely on 0 = fully off, 1 = full.
+  it("strictly increases day → dusk → night (for every weather)", () => {
+    for (const weather of WEATHERS) {
+      const day = environmentParams({ time: "day", weather }).nightFactor;
+      const dusk = environmentParams({ time: "dusk", weather }).nightFactor;
+      const night = environmentParams({ time: "night", weather }).nightFactor;
+      expect(dusk).toBeGreaterThan(day);
+      expect(night).toBeGreaterThan(dusk);
+    }
+  });
+
+  it("is exactly 0 by day and 1 at night (weather-independent)", () => {
+    for (const weather of WEATHERS) {
+      expect(environmentParams({ time: "day", weather }).nightFactor).toBe(0);
+      expect(environmentParams({ time: "night", weather }).nightFactor).toBe(1);
     }
   });
 });

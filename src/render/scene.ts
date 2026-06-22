@@ -29,7 +29,7 @@ import type { Edge } from "../sim/graph";
 import { createCab, type CabView } from "./cab";
 import { buildScenery } from "./scenery";
 import { buildWorld, type WorldHandle } from "./terrain-mesh";
-import { makeEnvEquirect, disposeEnvEquirect, makeRainDropTexture } from "./textures";
+import { makeEnvEquirect, disposeEnvEquirect, makeRainDropTexture, makeRadialGlowTexture } from "./textures";
 import type { QualitySettings } from "./quality";
 
 const MPS_TO_MPH = 2.236936;
@@ -315,6 +315,76 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   rain.frustumCulled = false;
   scene.add(rain);
 
+  // ── Celestial layer (HLD §2.D): moon disc + additive halo + star field. The
+  //    whole group FOLLOWS THE EYE each frame (a sky-box, so it never depends on
+  //    the route's world extent) and the bodies are placed along env.sunDir at a
+  //    large radius; their opacity is faded by env.nightFactor (DL2 day→night
+  //    tracking) — washed out by day, full at night. Built ONCE and only
+  //    repositioned/refaded each frame, so it allocates nothing on env change and
+  //    cannot leak (AC-D). All fog:false so they read against the sky dome. ──────
+  const CELESTIAL_R = 2200; // < camera far (4000); sky writes no depth so no occlusion
+  // A hero moon set FORWARD over the line at a mid elevation so it sits in the
+  // driver's view (the env sun/moon vector points high and behind, out of the
+  // look-around arc). +X is screen-LEFT when facing +Z, so -X here places the moon
+  // in the open RIGHT windscreen pane (clear of the cab A-pillar). Day→night
+  // presence is handled by nightFactor, not its arc position — matching the proof,
+  // which also uses a fixed moon direction.
+  const MOON_DIR = new THREE.Vector3(-0.2, 0.4, 0.9).normalize();
+  const celestial = new THREE.Group();
+  celestial.frustumCulled = false;
+  const moonDiscMat = new THREE.MeshBasicMaterial({
+    color: 0xeef3ff,
+    fog: false,
+    transparent: true,
+    depthWrite: false,
+  });
+  const moonDisc = new THREE.Mesh(new THREE.SphereGeometry(40, 24, 16), moonDiscMat);
+  moonDisc.position.copy(MOON_DIR).multiplyScalar(CELESTIAL_R);
+  celestial.add(moonDisc);
+  const haloMat = new THREE.SpriteMaterial({
+    map: makeRadialGlowTexture(0xbcd2ff),
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    transparent: true,
+    fog: false,
+  });
+  const halo = new THREE.Sprite(haloMat);
+  halo.scale.set(820, 820, 1);
+  halo.position.copy(MOON_DIR).multiplyScalar(CELESTIAL_R - 40);
+  celestial.add(halo);
+  // Star field on a fixed dome relative to the group (seeded → stable shots).
+  const STAR_N = 520;
+  let starSeed = 0x1a2b3c4d >>> 0;
+  const starRng = (): number => {
+    starSeed = (starSeed + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(starSeed ^ (starSeed >>> 15), 1 | starSeed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const starPos = new Float32Array(STAR_N * 3);
+  for (let i = 0; i < STAR_N; i++) {
+    const th = starRng() * Math.PI * 2;
+    const ph = Math.acos(starRng() * 0.62 + 0.16); // a band from overhead toward the horizon
+    const rr = CELESTIAL_R + 180;
+    starPos[i * 3 + 0] = rr * Math.sin(ph) * Math.cos(th);
+    starPos[i * 3 + 1] = rr * Math.cos(ph); // up
+    starPos[i * 3 + 2] = rr * Math.sin(ph) * Math.sin(th);
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
+  const starMat = new THREE.PointsMaterial({
+    color: 0xbfd0ff,
+    size: 2,
+    sizeAttenuation: false,
+    fog: false,
+    transparent: true,
+    depthWrite: false,
+  });
+  const stars = new THREE.Points(starGeo, starMat);
+  stars.frustumCulled = false;
+  celestial.add(stars);
+  scene.add(celestial);
+
   // ── Cab: mounted on a train-fixed node (NOT the camera) so look-around turns
   //    the head inside a fixed cab. Driver sits front-LEFT (EYE_D = +0.5 in
   //    camera.ts ⇒ eye at world +0.5 = screen-left under the heading+π camera). ─
@@ -465,6 +535,18 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
       scene.environment = envTex;
       envSkyHex = env.skyColor;
       envGroundHex = env.groundColor;
+    }
+
+    // ── Celestial layer: follow the eye (sky-box) and fade the whole layer by
+    //    nightFactor (off by day, full at night). Bodies sit at fixed local
+    //    offsets, so only the group origin + opacities change per frame. ─────────
+    const nf = env.nightFactor;
+    celestial.visible = nf > 0.01;
+    if (celestial.visible) {
+      celestial.position.set(eye.x, eye.y, eye.z);
+      moonDiscMat.opacity = nf;
+      haloMat.opacity = 0.85 * nf;
+      starMat.opacity = nf;
     }
 
     updateSignals(view);

@@ -542,3 +542,32 @@ export function makeRainDropTexture(): THREE.CanvasTexture {
   tex.needsUpdate = true;
   return tex;
 }
+
+/**
+ * A soft radial glow sprite (the moon halo, HLD §2.D): full-ish colour alpha at
+ * the centre fading to transparent at the rim, the tint baked into the canvas so
+ * one additive SpriteMaterial carries it directly. sRGB-pinned (D23).
+ */
+export function makeRadialGlowTexture(colorHex: number): THREE.CanvasTexture {
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    const c = new THREE.Color(colorHex);
+    const r = Math.round(c.r * 255);
+    const g = Math.round(c.g * 255);
+    const b = Math.round(c.b * 255);
+    const cx = size / 2;
+    const grad = ctx.createRadialGradient(cx, cx, 0, cx, cx, cx);
+    grad.addColorStop(0, `rgba(${r},${g},${b},0.9)`);
+    grad.addColorStop(0.3, `rgba(${r},${g},${b},0.32)`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}

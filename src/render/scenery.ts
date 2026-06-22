@@ -71,6 +71,41 @@ export function buildScenery(scene: THREE.Scene, route: Route, gauge: number): v
   buildOverbridge(scene, route, gauge, 4000, 0x53585f); // a concrete one further on
   buildOverbridge(scene, route, gauge, 6600, 0x6b5747); // brick bridge in the country run
   buildPlatformPeople(scene, route, gauge);
+  buildMarkerLights(scene, route, gauge); // warm ballast-edge glints (HLD §2.E)
+}
+
+/**
+ * Warm trackside marker lights (HLD §2.E): small emissive glints just off the
+ * ballast edge, alternating sides every ~24 m, that bloom at night into a lit
+ * lineside corridor. ONE InstancedMesh, emissive-only (no PointLight, so no
+ * R1/DL4 cost), placed via `placeOnCentreline` + `anchorY` so each sits ON the
+ * ground, skipping the viaduct valley and tunnel bore. Built ONCE.
+ */
+function buildMarkerLights(scene: THREE.Scene, route: Route, gauge: number): void {
+  const len = route.length;
+  const step = 24;
+  const N = Math.max(1, Math.floor(len / step));
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x0a0a0a,
+    emissive: 0xfff0d0,
+    emissiveIntensity: 2.2,
+  });
+  const mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.13, 6, 6), mat, N);
+  const d0 = gauge / 2 + 1.6; // just outside the ballast shoulder
+  for (let i = 0; i < N; i++) {
+    const s = (i + 1) * step;
+    const side = i % 2 ? 1 : -1;
+    const d = side * d0;
+    if (s > len || viaductSpanAt(route, s) || boreCorridorAt(route, s, d)) {
+      placeBox(mesh, i, 0, -1000, 0, 1, 1, 1); // park: no ground here
+      continue;
+    }
+    const place = placeOnCentreline(route, s, d);
+    placeBox(mesh, i, place.x, anchorY(route, s, d, 0.4), place.z, 1, 1, 1);
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.frustumCulled = false;
+  scene.add(mesh);
 }
 
 /**

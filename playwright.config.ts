@@ -17,7 +17,7 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   reporter: [["list"]],
-  timeout: 60_000,
+  timeout: 120_000, // a single SwiftShader composite/readback of the night scene is ~25s
   expect: { timeout: 15_000 },
   use: {
     baseURL: "http://localhost:5173",
