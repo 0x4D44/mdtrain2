@@ -2,6 +2,15 @@
 
 Distilled non-obvious gotchas for future sessions. Dated one-liners; newest first.
 
+- **2026-06-22** — Headless Playwright key presses get **lost** against this game's input model.
+  The keyboard source adds `e.code` on keydown; main.ts drains the edge set every rAF frame then
+  `kb.clear()`s it. A bare `page.keyboard.press()` (keydown+keyup back-to-back) can have its keyup
+  `edges.delete` the code **before any frame reads it** — silently dropping the press (this was
+  the real cause of `e`/`f` "not registering", not focus). Under SwiftShader the rAF loop is far
+  slower than 60 fps, so a *fixed* hold (`waitForTimeout(70)`) is unreliable too. Fix: hold the key
+  down across **≥2 real rAF frames** (`page.evaluate(requestAnimationFrame…)`) before releasing —
+  see `e2e/night.spec.ts` `tap()`. Also: `page.screenshot()` STALLS on the perpetual WebGL canvas —
+  use a `clip`-ed viewport capture (~25 s each under SwiftShader; raise the test timeout).
 - **2026-06-20** — `vitest` transpiles with esbuild and does **NOT** typecheck. A test can
   pass `vitest run` while `tsc --noEmit` (and therefore `npm run check` / `npm run build`)
   fails on it. After editing ANY `.ts` (especially tests), run `npm run check`, not just
