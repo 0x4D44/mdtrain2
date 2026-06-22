@@ -235,8 +235,13 @@ function buildTrees(scene: THREE.Scene, route: Route, gauge: number): void {
   const N = 720; // denser woodland (was 360) — #5
   const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3a28, roughness: 1 });
   const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.26, 1, 6), trunkMat, N);
-  const foliageMat = new THREE.MeshStandardMaterial({ color: 0x33602f, roughness: 1, flatShading: true });
+  // White base so per-instance instanceColor carries the true foliage tint — a
+  // varied palette of greens (+ a couple yellow-green / autumn-brown) so the
+  // woodland isn't one flat tone (R11 — the biggest "toy diorama" tell).
+  const foliageMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true });
   const foliage = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), foliageMat, N);
+  const foliageTints = [0x3a6b2f, 0x2f5527, 0x4a7233, 0x586b2c, 0x6f5e34, 0x356048];
+  const FOLIAGE_COL = new THREE.Color();
   const minD = gauge / 2 + 7; // clear of the track / fence
   let placed = 0;
   let guard = 0;
@@ -261,8 +266,12 @@ function buildTrees(scene: THREE.Scene, route: Route, gauge: number): void {
       const trunkH = h * 0.45;
       placeBox(trunks, placed, place.x, baseY + trunkH / 2, place.z, 1, trunkH, 1);
       const fr = h * 0.42; // foliage radius
-      TMP_M.compose(TMP_P.set(place.x, baseY + trunkH + fr * 0.7, place.z), NOROT, TMP_S.set(fr, fr * 1.25, fr));
+      // Per-instance squash/stretch so canopies aren't identical gems.
+      const fx = fr * (0.78 + rnd() * 0.5);
+      const fz = fr * (0.78 + rnd() * 0.5);
+      TMP_M.compose(TMP_P.set(place.x, baseY + trunkH + fr * 0.7, place.z), NOROT, TMP_S.set(fx, fr * (1.0 + rnd() * 0.6), fz));
       foliage.setMatrixAt(placed, TMP_M);
+      foliage.setColorAt(placed, FOLIAGE_COL.setHex(foliageTints[Math.floor(rnd() * foliageTints.length)] ?? 0x3a6b2f));
       placed++;
     }
   }
@@ -273,6 +282,7 @@ function buildTrees(scene: THREE.Scene, route: Route, gauge: number): void {
   }
   trunks.instanceMatrix.needsUpdate = true;
   foliage.instanceMatrix.needsUpdate = true;
+  if (foliage.instanceColor) foliage.instanceColor.needsUpdate = true;
   trunks.frustumCulled = false;
   foliage.frustumCulled = false;
   scene.add(trunks);

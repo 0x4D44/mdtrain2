@@ -173,7 +173,7 @@ export function buildWorld(
   const ballastMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 });
   wireMaps(ballastMat, tex.ballast, 0.15);
   track(ballastMat);
-  const sleeperMat = new THREE.MeshStandardMaterial({ color: 0x2a2622, roughness: 0.95 });
+  const sleeperMat = new THREE.MeshStandardMaterial({ color: 0x4a443c, roughness: 0.95 }); // concrete grey-brown, not near-black (R12)
   track(sleeperMat);
 
   buildTrackRibbon(group, route, tier, railMaterial, ballastMat, sleeperMat, track);

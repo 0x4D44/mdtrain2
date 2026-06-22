@@ -648,7 +648,7 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   //    world doesn't cover). Mirrors buildTrackRibbon but reads the edge through
   //    placeOnEdge. placeOnEdge.y is the formation height (formationHeight ==
   //    heightAt), so rails sit RAIL_TOP above it — exactly like the main line. ──
-  const edgeSleeperMat = new THREE.MeshStandardMaterial({ color: 0x2a2622, roughness: 0.95 });
+  const edgeSleeperMat = new THREE.MeshStandardMaterial({ color: 0x4a443c, roughness: 0.95 }); // concrete grey-brown (R12)
   const EDGE_RAIL_TOP = 0.06, EDGE_RAIL_H = 0.12;
   function addEdgeTrack(edge: Edge): void {
     const len = edge.route.length;
@@ -867,7 +867,9 @@ function buildLineside(scene: THREE.Scene, route: Route): void {
   //    mast to its staggered contact-wire point so the wire visibly hangs off the
   //    support (#7/#8). All InstancedMesh; NO per-mast Group (keeps the R3 budget). ─
   const mastN = oleMastCount(route);
-  const mastMat = new THREE.MeshStandardMaterial({ color: 0x2a2f37, roughness: 0.7, metalness: 0.55 });
+  // Lighter steel-grey + metallic/envmap so the near mast reads as a slim grey
+  // lattice catching the sky, not a black bar slashing the windscreen (R9 partial).
+  const mastMat = new THREE.MeshStandardMaterial({ color: 0x4b525b, roughness: 0.55, metalness: 0.7, envMapIntensity: 1.4 });
   // Segmented/tapered post: a tall lower trunk + a slimmer upper section give the
   // box a stepped, lattice-like read without leaving InstancedMesh.
   const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.26, OLE_POST_H * 0.6, 0.26), mastMat, mastN);
@@ -876,7 +878,7 @@ function buildLineside(scene: THREE.Scene, route: Route): void {
   const arms = new THREE.InstancedMesh(new THREE.BoxGeometry(2.4, 0.1, 0.1), mastMat, mastN);
   // Registration arm/dropper: one slim box per mast, oriented to reach from the
   // cantilever tip down/in to that mast's staggered wire point (the connection).
-  const dropMat = new THREE.MeshStandardMaterial({ color: 0x3a4049, roughness: 0.6, metalness: 0.6 });
+  const dropMat = new THREE.MeshStandardMaterial({ color: 0x586069, roughness: 0.5, metalness: 0.7, envMapIntensity: 1.4 });
   const drops = new THREE.InstancedMesh(new THREE.BoxGeometry(0.05, 1, 0.05), dropMat, mastN);
   const wirePt = new THREE.Vector3();
   const dropDir = new THREE.Vector3();
