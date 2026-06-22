@@ -425,7 +425,7 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
         const size = new THREE.Vector2(parent.clientWidth, parent.clientHeight);
         const comp = new ec.EffectComposer(renderer);
         comp.addPass(new rp.RenderPass(scene, camera));
-        const bloom = new ub.UnrealBloomPass(size, 0.6, 0.6, 0.85);
+        const bloom = new ub.UnrealBloomPass(size, 0.6, 0.6, 0.9); // threshold 0.9: only true highlights bloom (tame moon/lamp blow-out)
         comp.addPass(bloom);
         comp.addPass(new op.OutputPass()); // applies ACES + sRGB once
         comp.setSize(parent.clientWidth, parent.clientHeight);

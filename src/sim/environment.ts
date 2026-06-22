@@ -120,7 +120,7 @@ interface Lighting {
 const LIGHTING: Record<TimeOfDay, Lighting> = {
   day: { hemiSky: 0xdfe9f5, hemiGround: 0x8f9470, sun: 0xfff6e6, ambI: 1.5, sunI: 2.1, ground: 0x5e6a44 },
   dusk: { hemiSky: 0xf2b079, hemiGround: 0x4a3742, sun: 0xff9a52, ambI: 1.0, sunI: 1.35, ground: 0x40392e },
-  night: { hemiSky: 0x1a2636, hemiGround: 0x03040a, sun: 0x8aa0c8, ambI: 0.45, sunI: 0.6, ground: 0x0e140f },
+  night: { hemiSky: 0x1a2636, hemiGround: 0x03040a, sun: 0x8aa0c8, ambI: 0.6, sunI: 0.6, ground: 0x141b22 },
 };
 
 const clamp = (x: number, lo: number, hi: number): number =>
@@ -133,7 +133,7 @@ const clamp = (x: number, lo: number, hi: number): number =>
 const EXPOSURE: Record<TimeOfDay, number> = {
   day: 1.0,
   dusk: 0.85,
-  night: 0.65,
+  night: 0.75, // lifted from 0.65 so the rails/ballast silhouette (not a black void)
 };
 
 /**
@@ -180,7 +180,8 @@ const SUN_COLOR_PBR: Record<TimeOfDay, number> = {
 const darknessBloom: Record<TimeOfDay, number> = {
   day: 0.2,
   dusk: 0.5,
-  night: 1.0,
+  night: 0.65, // was 1.0 — tamed so the moon/lamp keep their cores (no white blobs);
+  // still the strongest time (night > dusk > day) so O10 ordering + night×rain-max hold.
 };
 const wetGlowBloom: Record<Weather, number> = {
   clear: 0.6,
