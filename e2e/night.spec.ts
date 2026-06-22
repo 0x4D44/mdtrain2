@@ -108,6 +108,7 @@ const SHOTS: Shot[] = [
   { name: "07-signal-brinemouth", s: 9895 },
   { name: "08-drive-kingsgate", s: 60, drive: 6 },
   { name: "09-moon", s: 4300, look: { dx: 0, dy: -45 } }, // tilt up to frame the hero moon (right pane)
+  { name: "10-traffic", s: 4250, look: { dx: -150, dy: 25 } }, // look to the roadside traffic
 ];
 
 for (const sh of SHOTS) {

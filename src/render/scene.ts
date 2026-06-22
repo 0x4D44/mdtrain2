@@ -27,7 +27,7 @@ import { eyePose, cabAttitudeTarget, EYE_HEIGHT, EYE_D } from "../sim/camera";
 import { placeOnEdge, planarPoseOnEdge } from "../sim/graph-geom";
 import type { Edge } from "../sim/graph";
 import { createCab, type CabView } from "./cab";
-import { buildScenery } from "./scenery";
+import { buildScenery, buildTraffic, type TrafficHandle } from "./scenery";
 import { buildWorld, type WorldHandle } from "./terrain-mesh";
 import { makeEnvEquirect, disposeEnvEquirect, makeRainDropTexture, makeRadialGlowTexture } from "./textures";
 import type { QualitySettings } from "./quality";
@@ -285,6 +285,7 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   const heads = buildSignals(scene, route);
   buildLineside(scene, route);
   buildScenery(scene, route, GAUGE); // trees, overbridges, platform people
+  const traffic: TrafficHandle = buildTraffic(scene, route, GAUGE); // deterministic road traffic
 
   // ── Contact wire: swept along the spine at pantograph height (R2 builds the
   //    track ribbon but not the wire — sweep it here). One InstancedMesh. ──────
@@ -550,6 +551,7 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
     }
 
     updateSignals(view);
+    traffic.update(view.dt);
     if (env.rainIntensity > 0) updateRain(view, eye.x, eye.y, eye.z);
 
     // ── Project the cab view from sim state ────────────────────────────────────

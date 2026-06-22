@@ -108,6 +108,112 @@ function buildMarkerLights(scene: THREE.Scene, route: Route, gauge: number): voi
   scene.add(mesh);
 }
 
+/** A live traffic system: built once, stepped each frame from scene.ts. */
+export interface TrafficHandle {
+  /** Advance every car by `dt` seconds and re-write the instance matrices. */
+  update(dt: number): void;
+}
+
+/**
+ * Deterministic road traffic alongside the line (HLD §2.F, optional). A handful
+ * of cars run on notional roads either side of the railway, within a flat open-
+ * country chainage band, each a dark body with emissive white headlights and red
+ * tail-lights — so at night you read sweeping head/tail-lights without any road
+ * mesh. Bodies / headlights / tail-lights are THREE InstancedMeshes (≈3 draw
+ * calls for ALL cars); the per-frame `update` only re-writes matrices (NO
+ * allocation). Placement is seeded and stepping is `speed·dt` — no `Math.random`
+ * in the loop (DL3) — and the lights are emissive-only, ZERO PointLights (DL4).
+ */
+export function buildTraffic(scene: THREE.Scene, route: Route, gauge: number): TrafficHandle {
+  // A tight band of flat open country straddling the hero truss (4000), so the
+  // cars stay dense enough to read on the approach rather than scattered over km.
+  const BAND_LO = 3950;
+  const BAND_HI = 4600;
+  const BAND = BAND_HI - BAND_LO;
+  const rnd = makeRng(0x0ca4ca4e);
+  const lanes = [
+    { d: -(gauge / 2 + 12), dir: 1 },
+    { d: -(gauge / 2 + 17), dir: -1 },
+    { d: gauge / 2 + 14, dir: -1 },
+  ];
+  const perLane = 6;
+  const cars: { s: number; d: number; dir: number; speed: number }[] = [];
+  for (const lane of lanes) {
+    for (let k = 0; k < perLane; k++) {
+      cars.push({
+        s: BAND_LO + (k / perLane) * BAND + rnd() * 50,
+        d: lane.d,
+        dir: lane.dir,
+        speed: 9 + rnd() * 7, // ~20–36 mph
+      });
+    }
+  }
+  const N = cars.length;
+
+  const bodies = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(1.9, 1.3, 4.2),
+    new THREE.MeshStandardMaterial({ color: 0x0c0d10, roughness: 0.5, metalness: 0.4 }),
+    N,
+  );
+  const heads = new THREE.InstancedMesh(
+    new THREE.SphereGeometry(0.2, 6, 6),
+    new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xfdfbe6, emissiveIntensity: 3.2 }),
+    N * 2,
+  );
+  const tails = new THREE.InstancedMesh(
+    new THREE.SphereGeometry(0.16, 6, 6),
+    new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff2a12, emissiveIntensity: 1.8 }),
+    N * 2,
+  );
+  bodies.frustumCulled = false;
+  heads.frustumCulled = false;
+  tails.frustumCulled = false;
+  scene.add(bodies, heads, tails);
+
+  // Per-frame scratch (reused — NO allocation in update()).
+  const pos = new THREE.Vector3();
+  const wp = new THREE.Vector3();
+  const off = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const euler = new THREE.Euler(0, 0, 0, "YXZ");
+  const ONE = new THREE.Vector3(1, 1, 1);
+
+  const setLight = (mesh: THREE.InstancedMesh, idx: number, lx: number, lz: number): void => {
+    off.set(lx, 0, lz).applyQuaternion(quat);
+    wp.copy(pos).add(off);
+    TMP_M.compose(wp, quat, ONE);
+    mesh.setMatrixAt(idx, TMP_M);
+  };
+
+  function update(dt: number): void {
+    for (let i = 0; i < N; i++) {
+      const car = cars[i];
+      if (!car) continue;
+      car.s += car.dir * car.speed * dt;
+      if (car.s > BAND_HI) car.s -= BAND;
+      else if (car.s < BAND_LO) car.s += BAND;
+      const place = placeOnCentreline(route, car.s, car.d);
+      const baseY = anchorY(route, car.s, car.d, 0);
+      euler.set(0, place.heading + (car.dir > 0 ? 0 : Math.PI), 0); // face travel
+      quat.setFromEuler(euler);
+      pos.set(place.x, baseY + 0.65, place.z);
+      TMP_M.compose(pos, quat, ONE);
+      bodies.setMatrixAt(i, TMP_M);
+      // Headlights at the front (+Z local), tail-lights at the back (−Z local).
+      setLight(heads, i * 2, -0.6, 2.05);
+      setLight(heads, i * 2 + 1, 0.6, 2.05);
+      setLight(tails, i * 2, -0.6, -2.05);
+      setLight(tails, i * 2 + 1, 0.6, -2.05);
+    }
+    bodies.instanceMatrix.needsUpdate = true;
+    heads.instanceMatrix.needsUpdate = true;
+    tails.instanceMatrix.needsUpdate = true;
+  }
+
+  update(0); // place cars at their seeded start before the first render
+  return { update };
+}
+
 /**
  * Clumps of trees both sides: a trunk mesh + a foliage mesh, instanced. Each tree
  * is placed at a curvilinear (s, d): `placeOnCentreline` gives world (x, z) and
