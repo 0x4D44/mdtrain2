@@ -55,10 +55,10 @@ async function shot(page: Page, path: string): Promise<void> {
   }
 }
 
-/** Cycle day → dusk → night (the env ring's first three entries are all rainy). */
-async function setNight(page: Page): Promise<void> {
-  await tap(page, "KeyE"); // day  → dusk
-  await tap(page, "KeyE"); // dusk → night
+// Env ring (cycled by KeyE from the default): 0 day/rain · 1 dusk/rain ·
+// 2 night/rain · 3 day/clear. `setEnv(n)` presses E n times to land on entry n.
+async function setEnv(page: Page, presses: number): Promise<void> {
+  for (let i = 0; i < presses; i++) await tap(page, "KeyE");
 }
 
 /** Drive away from a stand: reverser forward, acknowledge, brakes off, power up,
@@ -93,6 +93,7 @@ interface Shot {
   s: number; // ?s= seed chainage (frames a set-piece without driving there)
   drive?: number; // seconds to drive after seeding (0/undefined = static)
   look?: { dx: number; dy: number }; // optional head turn before the capture
+  env?: number; // env-ring entry (E-presses): 0 day/rain·1 dusk·2 night·3 day/clear. Default 2.
 }
 
 // Set-pieces along KINGSGATE_SEAHAVEN. Signals sit at 2120 / 5920 / 9920 and face
@@ -109,10 +110,19 @@ const SHOTS: Shot[] = [
   { name: "08-drive-kingsgate", s: 60, drive: 6 },
   { name: "09-moon", s: 4300, look: { dx: 0, dy: -45 } }, // tilt up to frame the hero moon (right pane)
   { name: "10-traffic", s: 4250, look: { dx: -150, dy: 25 } }, // look to the roadside traffic
+  // Daylight (clear) hero scenes — realism is mostly a daytime concern (env=3).
+  { name: "day-01-kingsgate", s: 350, env: 3 },
+  { name: "day-02-signal-ashcombe", s: 2095, env: 3 },
+  { name: "day-03-truss-bridge", s: 3982, env: 3 },
+  { name: "day-04-open-country", s: 4300, env: 3 },
+  { name: "day-05-viaduct", s: 7950, env: 3 },
+  { name: "day-06-drive-kingsgate", s: 60, drive: 6, env: 3 },
+  // Dusk approach (env=1) — the golden-hour transition.
+  { name: "dusk-01-country", s: 4300, env: 1 },
 ];
 
 for (const sh of SHOTS) {
-  test(`night shot: ${sh.name}`, async ({ page }) => {
+  test(`visual shot: ${sh.name}`, async ({ page }) => {
     const errors: string[] = [];
     page.on("console", (m) => {
       if (m.type() === "error") errors.push(`[console] ${m.text()}`);
@@ -129,7 +139,7 @@ for (const sh of SHOTS) {
     await page.locator("#app").click({ position: { x: 640, y: 400 } });
 
     await tap(page, "KeyH"); // hide the help panel (shown by default)
-    await setNight(page);
+    await setEnv(page, sh.env ?? 2); // default: the wet-night
     if (sh.drive && sh.drive > 0) await drive(page, sh.drive);
     if (sh.look) await lookAround(page, sh.look.dx, sh.look.dy);
     await page.waitForTimeout(400);
