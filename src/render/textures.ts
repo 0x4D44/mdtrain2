@@ -378,21 +378,28 @@ export function buildFacade(
   const a = ac.getContext("2d") as CanvasRenderingContext2D;
   const ec = document.createElement("canvas"); ec.width = W; ec.height = H;
   const e = ec.getContext("2d") as CanvasRenderingContext2D;
-  // Mid-grey masonry base so the per-instance tint reads; black emissive base.
-  a.fillStyle = "rgb(120,122,128)"; a.fillRect(0, 0, W, H);
+  // Light warm-grey masonry base so the per-instance daylight tint reads as brick/
+  // stone (not charcoal under daylight exposure); black emissive base.
+  a.fillStyle = "rgb(150,148,142)"; a.fillRect(0, 0, W, H);
   e.fillStyle = "#000"; e.fillRect(0, 0, W, H);
-  const cols = 5, rows = 13, padX = 10, padY = 10;
+  const cols = 5, rows = 13, padX = 12, padY = 12;
   const cw = (W - padX * 2) / cols, ch = (H - padY * 2) / rows;
-  const ww = cw * 0.62, wh = ch * 0.6;
+  const ww = cw * 0.5, wh = ch * 0.52; // smaller panes so masonry shows between (R2 de-checker)
+  // Faint horizontal floor/spandrel coursing so the facade isn't a flat fill.
+  for (let r = 0; r <= rows; r++) {
+    const y = Math.round(padY + r * ch);
+    a.fillStyle = "rgba(0,0,0,0.10)"; a.fillRect(0, y - 1, W, 2);
+  }
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const wx = padX + c * cw + (cw - ww) / 2;
       const wy = padY + r * ch + (ch - wh) / 2;
-      a.fillStyle = "#3a3c42"; a.fillRect(wx, wy, ww, wh); // dark pane in the albedo
+      a.fillStyle = "rgba(0,0,0,0.35)"; a.fillRect(wx - 1, wy - 1, ww + 2, wh + 2); // recessed reveal/sill
+      a.fillStyle = "rgb(150,165,185)"; a.fillRect(wx, wy, ww, wh); // glassy blue-grey pane (reads as glass by day)
       if (rnd() < 0.5) {
         const col = warm[Math.floor(rnd() * warm.length)] as string;
-        e.fillStyle = col; e.fillRect(wx, wy, ww, wh); // lit window -> emissive
-        a.globalAlpha = 0.4; a.fillStyle = col; a.fillRect(wx, wy, ww, wh); a.globalAlpha = 1;
+        e.fillStyle = col; e.fillRect(wx, wy, ww, wh); // lit window -> emissive (night)
+        a.globalAlpha = 0.5; a.fillStyle = col; a.fillRect(wx, wy, ww, wh); a.globalAlpha = 1;
       }
     }
   }

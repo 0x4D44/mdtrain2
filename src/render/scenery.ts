@@ -50,6 +50,13 @@ function placeBox(mesh: THREE.InstancedMesh, i: number, x: number, y: number, z:
   mesh.setMatrixAt(i, TMP_M);
 }
 
+/** Handle returned by `buildScenery` for the per-frame env updates scene.ts owns. */
+export interface SceneryHandle {
+  /** The lit-window building material — scene.ts fades its emissive by nightFactor
+   *  so windows glow at dusk/night but go dark by day (not burning through noon). */
+  buildingMat: THREE.MeshStandardMaterial;
+}
+
 /**
  * Build all lineside props under `scene`, every one positioned through the pure
  * curvilinear core so it follows the real (curved, undulating) line and sits on
@@ -60,10 +67,10 @@ function placeBox(mesh: THREE.InstancedMesh, i: number, x: number, y: number, z:
  * `buildScenery(scene, route, gauge)` call site; `gauge` sizes the track-edge
  * clearances. LOD is render-time (needs the eye) — see the file header.
  */
-export function buildScenery(scene: THREE.Scene, route: Route, gauge: number): void {
+export function buildScenery(scene: THREE.Scene, route: Route, gauge: number): SceneryHandle {
   buildTrees(scene, route, gauge);
   buildBushes(scene, route, gauge); // low foliage / hedgerows between the trees
-  buildBuildings(scene, route, gauge); // city cluster ~Kingsgate, suburb ~Ashcombe
+  const buildingMat = buildBuildings(scene, route, gauge); // city ~Kingsgate, suburb ~Ashcombe
   // Road overbridges at sensible places on the route, clear of the viaduct valley
   // and the tunnel hill (each builder skips bad chainages internally).
   buildOverbridge(scene, route, gauge, 1200, 0x5a5e66); // concrete bridge in the Kingsgate cutting
@@ -72,6 +79,7 @@ export function buildScenery(scene: THREE.Scene, route: Route, gauge: number): v
   buildOverbridge(scene, route, gauge, 6600, 0x6b5747); // brick bridge in the country run
   buildPlatformPeople(scene, route, gauge);
   buildMarkerLights(scene, route, gauge); // warm ballast-edge glints (HLD §2.E)
+  return { buildingMat };
 }
 
 /**
@@ -322,24 +330,25 @@ function buildBushes(scene: THREE.Scene, route: Route, gauge: number): void {
  * set BACK from the line (beyond the fence), skipping the viaduct valley and bore.
  * Density and height fall off with |d| and away from the urban centres. Built ONCE.
  */
-function buildBuildings(scene: THREE.Scene, route: Route, gauge: number): void {
+function buildBuildings(scene: THREE.Scene, route: Route, gauge: number): THREE.MeshStandardMaterial {
   const len = route.length;
   const rnd = makeRng(20260617);
   const N = 240;
   // Lit-window facade (HLD §2.A): one shared albedo + emissive map on the single
-  // InstancedMesh (DL1). instanceColor still tints the masonry per building; the
-  // emissive windows bloom at night, wash out by day. Box UVs stretch the grid per
-  // block — acceptable at night/at speed (R2).
+  // InstancedMesh (DL1). instanceColor tints the masonry per building. emissive
+  // intensity is driven by scene.ts from nightFactor (lit at night, dark by day).
   const facade = buildFacade(4);
   const mat = new THREE.MeshStandardMaterial({
     map: facade.albedo,
     emissiveMap: facade.emissive,
     emissive: 0xffffff,
-    emissiveIntensity: 1.2,
+    emissiveIntensity: 0, // set per-frame from nightFactor in scene.ts
     roughness: 0.88,
   });
   const blocks = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, N);
-  const tints = [0x3a3d44, 0x46413b, 0x3d4248, 0x4a4540, 0x363a40, 0x504a42];
+  // Daylight masonry palette (brick / buff / stone / sandstone / pale render / brown)
+  // so blocks read as inhabited buildings by day, not charcoal monoliths.
+  const tints = [0xb08868, 0xc8b89a, 0xa8aab0, 0xbfa884, 0xc2c4c0, 0x9c8a72];
   const minD = gauge / 2 + 12; // well back from the line, beyond the fence
   const col = new THREE.Color();
   // Two urban zones: (centre chainage, half-length, max height, lateral reach).
@@ -377,6 +386,7 @@ function buildBuildings(scene: THREE.Scene, route: Route, gauge: number): void {
   if (blocks.instanceColor) blocks.instanceColor.needsUpdate = true;
   blocks.frustumCulled = false;
   scene.add(blocks);
+  return mat;
 }
 
 /**

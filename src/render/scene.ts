@@ -27,7 +27,7 @@ import { eyePose, cabAttitudeTarget, EYE_HEIGHT, EYE_D } from "../sim/camera";
 import { placeOnEdge, planarPoseOnEdge } from "../sim/graph-geom";
 import type { Edge } from "../sim/graph";
 import { createCab, type CabView } from "./cab";
-import { buildScenery, buildTraffic, type TrafficHandle } from "./scenery";
+import { buildScenery, buildTraffic, type TrafficHandle, type SceneryHandle } from "./scenery";
 import { buildWorld, type WorldHandle } from "./terrain-mesh";
 import { makeEnvEquirect, disposeEnvEquirect, makeRainDropTexture, makeRadialGlowTexture } from "./textures";
 import type { QualitySettings } from "./quality";
@@ -284,7 +284,7 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   for (const station of route.stations) buildStation(scene, route, station);
   const heads = buildSignals(scene, route);
   buildLineside(scene, route);
-  buildScenery(scene, route, GAUGE); // trees, overbridges, platform people
+  const scenery: SceneryHandle = buildScenery(scene, route, GAUGE); // trees, overbridges, buildings, people
   const traffic: TrafficHandle = buildTraffic(scene, route, GAUGE); // deterministic road traffic
 
   // ── Contact wire: swept along the spine at pantograph height (R2 builds the
@@ -527,6 +527,10 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
     moon.position.copy(sunDirVec).multiplyScalar(SUN_DISTANCE);
     rainMat.opacity = env.rainIntensity;
     world.railMaterial.roughness = world.railRoughnessFor(env.railWetness);
+    // Building windows light up at dusk/night and go dark by day (no noon glow).
+    // 1.9 compensates for the smaller window area (M2) so the night skyline still
+    // glows brightly while daytime panes read as glass.
+    scenery.buildingMat.emissiveIntensity = 1.9 * env.nightFactor;
 
     // ── Eye-tracking shadow sun: move with the eye along env.sunDir ────────────
     if (shadowsEnabled) {
