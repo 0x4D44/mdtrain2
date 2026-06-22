@@ -810,7 +810,7 @@ function buildSignals(scene: THREE.Scene, route: Route): SignalHead[] {
 // to that side at the mast, so the wire zig-zags mast-to-mast (#6).
 const OLE_SPACING = 45; // mast pitch, m
 const OLE_STAGGER = 0.2; // contact-wire lateral pull-off at each mast, m
-const OLE_MAST_D = GAUGE / 2 + 2.6; // mast foot offset from the spine, m
+const OLE_MAST_D = GAUGE / 2 + 3.2; // mast foot offset from the spine, m (out of the near cess)
 const OLE_WIRE_H = 5.9; // contact-wire height above the formation, m
 const OLE_POST_H = 7.0; // post height, m
 
@@ -912,9 +912,12 @@ function buildLineside(scene: THREE.Scene, route: Route): void {
     // Registration/dropper: connect the cantilever tip (mast side, just above the
     // wire) to the staggered wire point. Orient a unit-Y box along that vector.
     oleWirePoint(route, i, wirePt);
-    const tipX = cArm.x;
-    const tipY = formY + OLE_WIRE_H + 0.45;
-    const tipZ = cArm.z;
+    // Hang a SHORT VERTICAL registration dropper directly above the staggered wire
+    // point — not a long diagonal from the mast-side cantilever tip, which read as
+    // a bar slashing the windscreen (R9).
+    const tipX = wirePt.x;
+    const tipY = wirePt.y + 0.5;
+    const tipZ = wirePt.z;
     dropDir.set(wirePt.x - tipX, wirePt.y - tipY, wirePt.z - tipZ);
     const dropLen = Math.max(0.05, dropDir.length());
     dropMid.set((tipX + wirePt.x) / 2, (tipY + wirePt.y) / 2, (tipZ + wirePt.z) / 2);
