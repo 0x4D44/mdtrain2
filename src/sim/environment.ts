@@ -245,7 +245,7 @@ export function environmentParams(env: Environment): EnvironmentParams {
   // perspective ALWAYS bites and the far ground hazes before its edge (R5).
   const dayness = env.time === "day" ? 1 : env.time === "dusk" ? 0.6 : 0;
   const fogNear = 14 + 12 * dayness; // 14 (night) .. 26 (day)
-  const fogFar = 70 + 90 * dayness - 40 * storminess; // ~160 day clear, 70 night
+  const fogFar = 70 + 150 * dayness - 45 * storminess; // ~220 day clear, 70 night — far enough to read into the haze + distant-land ridge (I2 R2)
 
   // Realism palette (HLD §2.3). exposure & sun colour/dir depend on time only;
   // bloom on time×weather. sunDir is normalised to a unit vector (O11).
@@ -305,7 +305,7 @@ function horizonColorFor(time: TimeOfDay, storminess: number): number {
   const base: Record<TimeOfDay, { r: number; g: number; b: number }> = {
     night: { r: 0x16, g: 0x22, b: 0x3c }, // faintly-lit deep-blue horizon
     dusk: { r: 0x4c, g: 0x3c, b: 0x44 }, // gentle warm-low — keeps the praised violet golden hour
-    day: { r: 0xcd, g: 0xd2, b: 0xd2 }, // pale luminous haze, brighter than the zenith
+    day: { r: 0xc2, g: 0xcd, b: 0xd8 }, // pale blue-grey haze (less near-white glare) (I2 R2)
   };
   const c = base[time];
   const grey = 0x20;

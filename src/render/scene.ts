@@ -212,6 +212,8 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
   const skyUniforms = {
     topColor: { value: new THREE.Color(0x05080f) },
     bottomColor: { value: new THREE.Color(0x0a1228) },
+    landColor: { value: new THREE.Color(0x9aa6a0) }, // hazy distant-land silhouette
+    landFactor: { value: 0 }, // day/dusk only (1 - nightFactor), written per frame
     offset: { value: 33 },
     exponent: { value: 0.6 },
   };
@@ -230,13 +232,23 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
     fragmentShader: `
       uniform vec3 topColor;
       uniform vec3 bottomColor;
+      uniform vec3 landColor;
+      uniform float landFactor;
       uniform float offset;
       uniform float exponent;
       varying vec3 vWorldPosition;
       void main() {
-        float h = normalize(vWorldPosition + vec3(0.0, offset, 0.0)).y;
+        vec3 dir = normalize(vWorldPosition + vec3(0.0, offset, 0.0));
+        float h = dir.y;
         float t = pow(max(h, 0.0), exponent);
-        gl_FragColor = vec4(mix(bottomColor, topColor, t), 1.0);
+        vec3 col = mix(bottomColor, topColor, t);
+        // A faint undulating distant-land ridge sitting in the haze just above the
+        // horizon, so the day world fades INTO land, not a white-out card (I2 R2).
+        float az = atan(dir.x, dir.z);
+        float ridge = 0.024 + 0.012 * sin(az * 3.0) + 0.006 * sin(az * 7.0 + 1.3) + 0.004 * sin(az * 13.0 + 4.1);
+        float land = smoothstep(ridge, ridge - 0.012, h) * landFactor;
+        col = mix(col, landColor, land * 0.8);
+        gl_FragColor = vec4(col, 1.0);
       }`,
   });
   const sky = new THREE.Mesh(new THREE.SphereGeometry(3000, 24, 12), skyMat);
@@ -512,6 +524,9 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
     // that) deepening to a dark zenith at night, driven by nightFactor.
     skyUniforms.topColor.value.setHex(env.skyColor).multiplyScalar(0.8 - 0.48 * env.nightFactor); // deeper day zenith
     skyUniforms.bottomColor.value.setHex(env.horizonColor); // distinct pale/warm horizon band (R3)
+    // Distant-land ridge: a hazed blend of ground + horizon, shown by day/dusk only.
+    skyUniforms.landColor.value.setHex(env.groundColor).lerp(skyUniforms.bottomColor.value, 0.62);
+    skyUniforms.landFactor.value = 1 - env.nightFactor;
     const fog = scene.fog as THREE.Fog;
     fog.color.setHex(env.horizonColor); // distance hazes into the horizon, not the zenith
     fog.near = env.fogNear;
@@ -999,7 +1014,7 @@ function buildContactWire(scene: THREE.Scene, route: Route): void {
   const MESS_RISE = 1.3; // messenger height above the contact wire at the masts, m
   const SAG = 0.6; // mid-span catenary droop of the messenger, m
   // Grey steel + sheen so the catenary reads as wires, not a dark slash (R4).
-  const wireMat = new THREE.MeshStandardMaterial({ color: 0x4a4e54, roughness: 0.5, metalness: 0.6, envMapIntensity: 1.2 });
+  const wireMat = new THREE.MeshStandardMaterial({ color: 0x646970, roughness: 0.45, metalness: 0.7, envMapIntensity: 1.5 }); // lighter steel so it doesn't read as a dark slash vs bright sky (I2 R4)
   const wire = new THREE.InstancedMesh(new THREE.BoxGeometry(0.04, 1, 0.04), wireMat, spanN * PER);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
