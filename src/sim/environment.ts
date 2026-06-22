@@ -118,7 +118,7 @@ interface Lighting {
   ground: number;
 }
 const LIGHTING: Record<TimeOfDay, Lighting> = {
-  day: { hemiSky: 0xdfe9f5, hemiGround: 0x8f9470, sun: 0xfff6e6, ambI: 1.8, sunI: 2.1, ground: 0x5e6a44 },
+  day: { hemiSky: 0xdfe9f5, hemiGround: 0x8f9470, sun: 0xfff6e6, ambI: 1.5, sunI: 2.1, ground: 0x5e6a44 },
   dusk: { hemiSky: 0xf2b079, hemiGround: 0x4a3742, sun: 0xff9a52, ambI: 1.0, sunI: 1.35, ground: 0x40392e },
   night: { hemiSky: 0x1a2636, hemiGround: 0x03040a, sun: 0x8aa0c8, ambI: 0.45, sunI: 0.6, ground: 0x0e140f },
 };
@@ -155,7 +155,9 @@ const NIGHT_FACTOR: Record<TimeOfDay, number> = {
  * light source (the convention scene.ts's DirectionalLight expects).
  */
 const SUN_DIR_RAW: Record<TimeOfDay, { x: number; y: number; z: number }> = {
-  day: { x: -0.3, y: 0.92, z: 0.25 },
+  // Day sun GRAZES (lower y) so surfaces show a lit/shadowed side — the strongest
+  // outdoor depth cue. Dusk/night left as-is (their shading already reads).
+  day: { x: -0.55, y: 0.6, z: 0.32 },
   dusk: { x: -0.8, y: 0.25, z: 0.1 },
   night: { x: 0.2, y: 0.55, z: -0.4 },
 };
@@ -233,7 +235,9 @@ export function environmentParams(env: Environment): EnvironmentParams {
   // line and scenery read into the distance.
   const dayness = env.time === "day" ? 1 : env.time === "dusk" ? 0.6 : 0;
   const fogNear = 14 + 12 * dayness; // 14 (night) .. 26 (day)
-  const fogFar = 90 + 230 * dayness - 50 * storminess; // open day, tighter storm/night
+  // Tighter than before so aerial perspective ALWAYS bites — the far ground fades
+  // into haze instead of ending at a knife-edge horizon (~220 day clear, 70 night).
+  const fogFar = 70 + 150 * dayness - 50 * storminess; // open day, tighter storm/night
 
   // Realism palette (HLD §2.3). exposure & sun colour/dir depend on time only;
   // bloom on time×weather. sunDir is normalised to a unit vector (O11).
@@ -271,7 +275,7 @@ function skyColorFor(time: TimeOfDay, storminess: number): number {
   const base: Record<TimeOfDay, { r: number; g: number; b: number }> = {
     night: { r: 0x0a, g: 0x12, b: 0x28 }, // deep blue
     dusk: { r: 0x3a, g: 0x30, b: 0x40 }, // dim warm-violet
-    day: { r: 0x9a, g: 0xa8, b: 0xc0 }, // pale overcast
+    day: { r: 0xb9, g: 0xc2, b: 0xcc }, // pale luminous blue-grey (not saturated cyan)
   };
   const c = base[time];
   // Storm pulls toward a darker neutral grey (deeper, less saturated).

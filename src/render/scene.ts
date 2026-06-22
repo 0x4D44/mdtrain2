@@ -506,7 +506,10 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
     // ── Apply the environment (exposure/sky/fog, lights, rain, rail sheen) ─────
     renderer.toneMappingExposure = env.exposure;
     (scene.background as THREE.Color).setHex(env.skyColor);
-    skyUniforms.topColor.value.setHex(env.skyColor).multiplyScalar(0.35); // darkened zenith
+    // Per-time zenith darkening: a bright, near-uniform dome by day (real skies are
+    // brightest near the horizon, NOT darkest overhead — the old flat 0.35 inverted
+    // that) deepening to a dark zenith at night, driven by nightFactor.
+    skyUniforms.topColor.value.setHex(env.skyColor).multiplyScalar(0.88 - 0.56 * env.nightFactor);
     skyUniforms.bottomColor.value.setHex(env.skyColor);
     const fog = scene.fog as THREE.Fog;
     fog.color.setHex(env.skyColor);
@@ -517,12 +520,16 @@ export function createScene(parent: HTMLElement, route: Route, opts?: SceneOptio
     hemi.intensity = env.ambientIntensity;
     moon.color.setHex(env.sunColor);
     moon.intensity = env.moonIntensity;
+    // Aim the diffuse fill light along env.sunDir so the world has a FELT sun (a
+    // DirectionalLight's direction is position→target=origin, so position along
+    // sunDir lights surfaces facing the sun). Previously pinned overhead → flat day.
+    sunDirVec.set(env.sunDir.x, env.sunDir.y, env.sunDir.z);
+    moon.position.copy(sunDirVec).multiplyScalar(SUN_DISTANCE);
     rainMat.opacity = env.rainIntensity;
     world.railMaterial.roughness = world.railRoughnessFor(env.railWetness);
 
     // ── Eye-tracking shadow sun: move with the eye along env.sunDir ────────────
     if (shadowsEnabled) {
-      sunDirVec.set(env.sunDir.x, env.sunDir.y, env.sunDir.z);
       sunTarget.position.set(eye.x, eye.y, eye.z);
       sun.position.copy(sunTarget.position).addScaledVector(sunDirVec, SUN_DISTANCE);
       sun.color.setHex(env.sunColorPbr);
