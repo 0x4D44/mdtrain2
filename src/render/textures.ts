@@ -268,14 +268,15 @@ export interface TextureSet {
 function buildGround(size: number, repeat: number, aniso: number): MaterialMaps {
   // Patchy grass with earthy lows; gentle macro relief, fine blade detail.
   const { height, detail } = sampleFields(size, 4, 4, 16, 3, 1311);
-  const earth: RGB = [80, 64, 42];
-  const grassDark: RGB = [40, 56, 28]; // darker, less vivid than a mown lawn
-  const grassLight: RGB = [86, 104, 54]; // cooler/duller green
+  const earth: RGB = [82, 66, 44];
+  const grassDark: RGB = [36, 52, 26]; // darker, wider spread for stronger banding
+  const grassLight: RGB = [94, 114, 56]; // cooler/duller green
   const albedo = buildAlbedoCanvas(size, height, detail, (h, n) => {
-    // Macro field BANDS the grass tone at metre scale (kills the uniform-lawn read);
-    // detail breaks it up; broad earthy/dry patches in the lows.
-    const base = mix(grassDark, grassLight, n * 0.55 + h * 0.45);
-    const withEarth = mix(earth, base, smooth(Math.min(1, h * 0.95 + 0.1)));
+    // Lean on the MACRO field (h) for metre-scale dry/lush banding that survives
+    // bright exposure; the fine detail (n) just breaks the edges. Broad earthy
+    // patches in the lows so it stops reading as a uniform mown carpet (R10).
+    const base = mix(grassDark, grassLight, n * 0.35 + h * 0.65);
+    const withEarth = mix(earth, base, smooth(Math.min(1, h * 0.9 + 0.08)));
     return withEarth;
   });
   // Relief from both macro lumps and blade detail.

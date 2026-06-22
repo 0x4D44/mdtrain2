@@ -359,7 +359,7 @@ function buildBuildings(scene: THREE.Scene, route: Route, gauge: number): THREE.
   // Daylight masonry palette (brick / buff / stone / sandstone / pale render / brown)
   // so blocks read as inhabited buildings by day, not charcoal monoliths.
   const tints = [0xb08868, 0xc8b89a, 0xa8aab0, 0xbfa884, 0xc2c4c0, 0x9c8a72];
-  const minD = gauge / 2 + 12; // well back from the line, beyond the fence
+  const minD = gauge / 2 + 18; // set further back so tall blocks don't loom over the cess (R8)
   const col = new THREE.Color();
   // Dark concrete parapet caps so blocks aren't bare flat-topped slabs (R7).
   const roofMat = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.95 });
