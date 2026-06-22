@@ -101,7 +101,7 @@ interface Shot {
 const SHOTS: Shot[] = [
   { name: "01-kingsgate-skyline", s: 350 },
   { name: "02-signal-ashcombe", s: 2095 },
-  { name: "03-overbridge-country", s: 3960 },
+  { name: "03-truss-bridge", s: 3982 },
   { name: "04-open-country", s: 4300 },
   { name: "05-signal-wealdham", s: 5895 },
   { name: "06-viaduct", s: 7950 },

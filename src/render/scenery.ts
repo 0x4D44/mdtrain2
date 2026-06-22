@@ -68,7 +68,7 @@ export function buildScenery(scene: THREE.Scene, route: Route, gauge: number): v
   // and the tunnel hill (each builder skips bad chainages internally).
   buildOverbridge(scene, route, gauge, 1200, 0x5a5e66); // concrete bridge in the Kingsgate cutting
   buildOverbridge(scene, route, gauge, 3000, 0x6b5747); // brick road overbridge (Ashcombe)
-  buildOverbridge(scene, route, gauge, 4000, 0x53585f); // a concrete one further on
+  buildTrussBridge(scene, route, 4000); // the hero moonlit steel through-truss
   buildOverbridge(scene, route, gauge, 6600, 0x6b5747); // brick bridge in the country run
   buildPlatformPeople(scene, route, gauge);
   buildMarkerLights(scene, route, gauge); // warm ballast-edge glints (HLD §2.E)
@@ -311,6 +311,141 @@ function buildOverbridge(scene: THREE.Scene, route: Route, gauge: number, s: num
     ab.position.set(ad * 1.6, railTop + deckClear / 2, 0);
     g.add(ab);
   }
+  scene.add(g);
+}
+
+/**
+ * The hero moonlit steel through-truss (HLD §2.C): a road bridge crossing the
+ * line, built as a Pratt-style lattice — bottom/top chords, verticals, alternating
+ * diagonals, top lateral bracing and corner support legs — placed and rotated by
+ * `placeOnCentreline`, with the deck soffit a loading-gauge clearance above
+ * `formationHeight` (R4). The steel is high-metalness / low-roughness with raised
+ * `envMapIntensity` so it catches the sky reflection, plus a faint self-glow and
+ * cool emissive nav-lights at every top-chord node that rim-light the lattice
+ * against the night. Every member is ONE InstancedMesh of scaled unit cylinders
+ * (so the whole truss is ~3 draw calls, not ~50 separate meshes). Built ONCE.
+ */
+function buildTrussBridge(scene: THREE.Scene, route: Route, s: number): void {
+  if (s < 0 || s > route.length) return;
+  if (viaductSpanAt(route, s) || boreCorridorAt(route, s, 0)) return;
+
+  const railTop = formationHeight(route, s);
+  const bottomY = railTop + 6.2; // deck soffit clearance above the rail top (R4)
+  const span = 22; // across the formation (local X)
+  const th = 5.5; // truss height (bottom chord → top chord)
+  const topY = bottomY + th;
+  const panels = 7;
+  const pw = span / panels;
+  const half = span / 2;
+  const zoff = 3.0; // half the road width (local Z, along the line)
+
+  const place = placeOnCentreline(route, s, 0);
+  const g = new THREE.Group();
+  g.position.set(place.x, 0, place.z);
+  g.quaternion.setFromAxisAngle(Y_AXIS, place.heading);
+
+  // Collect every steel member as a {a, b, radius} bar (group-local coords).
+  const bars: { a: THREE.Vector3; b: THREE.Vector3; r: number }[] = [];
+  const bar = (
+    ax: number, ay: number, az: number,
+    bx: number, by: number, bz: number,
+    r: number,
+  ): void => {
+    bars.push({ a: new THREE.Vector3(ax, ay, az), b: new THREE.Vector3(bx, by, bz), r });
+  };
+  for (const zz of [-zoff, zoff]) {
+    bar(-half, bottomY, zz, half, bottomY, zz, 0.16); // bottom chord
+    bar(-half, topY, zz, half, topY, zz, 0.16); // top chord
+    for (let i = 0; i <= panels; i++) {
+      const x = -half + i * pw;
+      bar(x, bottomY, zz, x, topY, zz, 0.09); // vertical
+    }
+    for (let i = 0; i < panels; i++) {
+      const x0 = -half + i * pw;
+      const x1 = x0 + pw;
+      const up = i % 2 === 0;
+      bar(x0, up ? bottomY : topY, zz, x1, up ? topY : bottomY, zz, 0.09); // diagonal
+    }
+    bar(-half, railTop, zz, -half, bottomY, zz, 0.18); // support leg (below the deck)
+    bar(half, railTop, zz, half, bottomY, zz, 0.18);
+  }
+  for (let i = 0; i <= panels; i++) {
+    const x = -half + i * pw;
+    bar(x, topY, -zoff, x, topY, zoff, 0.07); // top lateral bracing
+  }
+
+  // Cool steel that reads at night: metallic so it catches the moon's specular
+  // sheen + raised envMapIntensity for the sky reflection, plus a self-glow strong
+  // enough that the lattice never collapses to a flat silhouette (AC-C).
+  const steel = new THREE.MeshStandardMaterial({
+    color: 0x46505f,
+    metalness: 0.85,
+    roughness: 0.34,
+    envMapIntensity: 1.8,
+    emissive: 0x2c3a4d,
+    emissiveIntensity: 0.6,
+  });
+  const cyl = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 7), steel, bars.length);
+  const dir = new THREE.Vector3();
+  const mid = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const scl = new THREE.Vector3();
+  for (let i = 0; i < bars.length; i++) {
+    const bdef = bars[i];
+    if (!bdef) continue;
+    dir.subVectors(bdef.b, bdef.a);
+    const len = Math.max(0.01, dir.length());
+    mid.addVectors(bdef.a, bdef.b).multiplyScalar(0.5);
+    quat.setFromUnitVectors(Y_AXIS, dir.normalize());
+    scl.set(bdef.r, len, bdef.r);
+    TMP_M.compose(mid, quat, scl);
+    cyl.setMatrixAt(i, TMP_M);
+  }
+  cyl.instanceMatrix.needsUpdate = true;
+  cyl.frustumCulled = false;
+  g.add(cyl);
+
+  // Dark road deck spanning between the two trusses.
+  const deck = new THREE.Mesh(
+    new THREE.BoxGeometry(span, 0.4, zoff * 2),
+    new THREE.MeshStandardMaterial({ color: 0x202329, roughness: 0.9 }),
+  );
+  deck.position.set(0, bottomY, 0);
+  g.add(deck);
+
+  // Cool nav-lights at every top-chord node — they rim-light the lattice and trace
+  // the truss line against the sky. ONE emissive InstancedMesh (no PointLight).
+  const nodeMat = new THREE.MeshStandardMaterial({
+    color: 0x223044,
+    emissive: 0xc2d6ff,
+    emissiveIntensity: 2.4,
+  });
+  const nodes = new THREE.InstancedMesh(new THREE.SphereGeometry(0.13, 8, 8), nodeMat, (panels + 1) * 2);
+  let ni = 0;
+  for (const zz of [-zoff, zoff]) {
+    for (let i = 0; i <= panels; i++) {
+      placeBox(nodes, ni++, -half + i * pw, topY, zz, 1, 1, 1);
+    }
+  }
+  nodes.instanceMatrix.needsUpdate = true;
+  nodes.frustumCulled = false;
+  g.add(nodes);
+
+  // Warm lamps strung along the deck edge — a lit road across the bridge that
+  // contrasts the cool nav-lights. ONE emissive InstancedMesh (no PointLight).
+  const lampMat = new THREE.MeshStandardMaterial({
+    color: 0x1a1a1a,
+    emissive: 0xffe2b0,
+    emissiveIntensity: 2.6,
+  });
+  const lamps = new THREE.InstancedMesh(new THREE.SphereGeometry(0.14, 8, 8), lampMat, panels + 1);
+  for (let i = 0; i <= panels; i++) {
+    placeBox(lamps, i, -half + i * pw, bottomY + 0.5, zoff, 1, 1, 1);
+  }
+  lamps.instanceMatrix.needsUpdate = true;
+  lamps.frustumCulled = false;
+  g.add(lamps);
+
   scene.add(g);
 }
 
