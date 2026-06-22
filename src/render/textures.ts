@@ -266,8 +266,8 @@ export interface TextureSet {
 }
 
 function buildGround(size: number, repeat: number, aniso: number): MaterialMaps {
-  // Patchy grass with earthy lows; gentle macro relief, fine blade detail.
-  const { height, detail } = sampleFields(size, 4, 4, 16, 3, 1311);
+  // Patchy grass with earthy lows; gentle macro relief, finer blade detail (I2 R7).
+  const { height, detail } = sampleFields(size, 4, 4, 24, 3, 1311);
   const earth: RGB = [82, 66, 44];
   const grassDark: RGB = [36, 52, 26]; // darker, wider spread for stronger banding
   const grassLight: RGB = [94, 114, 56]; // cooler/duller green
@@ -295,7 +295,7 @@ function buildBallast(size: number, repeat: number, aniso: number): MaterialMaps
   // Coarse grey crushed stone: strong high-frequency detail, low macro drift.
   const { height, detail } = sampleFields(size, 8, 2, 48, 4, 5101); // finer stones (32→48)
   const dark: RGB = [50, 48, 45]; // darker voids between stones
-  const light: RGB = [168, 162, 150]; // brighter lit stone faces
+  const light: RGB = [150, 145, 137]; // lit stone faces — pulled back so day doesn't white-out / night doesn't snow-speckle (I2 R5)
   const albedo = buildAlbedoCanvas(size, height, detail, (_h, n) => {
     // Push contrast so distinct stones read (not a smooth pale-grey ribbon).
     const t = smooth(Math.max(0, Math.min(1, (n - 0.32) / 0.36)));
